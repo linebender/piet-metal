@@ -13,6 +13,8 @@
 		AE20EE1A227773A000207011 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AE20EE18227773A000207011 /* Main.storyboard */; };
 		AE20EE1D227773A000207011 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = AE20EE1C227773A000207011 /* main.m */; };
 		AE99FF612277800100937601 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = AE99FF5E2277800100937601 /* README.md */; };
+		AE99FF652277809B00937601 /* PietRenderer.m in Sources */ = {isa = PBXBuildFile; fileRef = AE99FF642277809B00937601 /* PietRenderer.m */; };
+		AE99FF692277CE7200937601 /* PietRender.metal in Sources */ = {isa = PBXBuildFile; fileRef = AE99FF682277CE7200937601 /* PietRender.metal */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +29,10 @@
 		AE20EE1C227773A000207011 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		AE20EE1E227773A000207011 /* piet_metal.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = piet_metal.entitlements; sourceTree = "<group>"; };
 		AE99FF5E2277800100937601 /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		AE99FF642277809B00937601 /* PietRenderer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PietRenderer.m; sourceTree = "<group>"; };
+		AE99FF66227780B000937601 /* PietRenderer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PietRenderer.h; sourceTree = "<group>"; };
+		AE99FF672277CDF200937601 /* PietShaderTypes.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PietShaderTypes.h; sourceTree = "<group>"; };
+		AE99FF682277CE7200937601 /* PietRender.metal */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.metal; path = PietRender.metal; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,13 +68,17 @@
 			children = (
 				AE20EE102277739F00207011 /* AppDelegate.h */,
 				AE20EE112277739F00207011 /* AppDelegate.m */,
-				AE20EE132277739F00207011 /* ViewController.h */,
-				AE20EE142277739F00207011 /* ViewController.m */,
 				AE20EE16227773A000207011 /* Assets.xcassets */,
-				AE20EE18227773A000207011 /* Main.storyboard */,
 				AE20EE1B227773A000207011 /* Info.plist */,
 				AE20EE1C227773A000207011 /* main.m */,
+				AE20EE18227773A000207011 /* Main.storyboard */,
 				AE20EE1E227773A000207011 /* piet_metal.entitlements */,
+				AE99FF682277CE7200937601 /* PietRender.metal */,
+				AE99FF66227780B000937601 /* PietRenderer.h */,
+				AE99FF642277809B00937601 /* PietRenderer.m */,
+				AE99FF672277CDF200937601 /* PietShaderTypes.h */,
+				AE20EE132277739F00207011 /* ViewController.h */,
+				AE20EE142277739F00207011 /* ViewController.m */,
 			);
 			path = TestApp;
 			sourceTree = "<group>";
@@ -145,6 +155,8 @@
 			files = (
 				AE20EE152277739F00207011 /* ViewController.m in Sources */,
 				AE20EE1D227773A000207011 /* main.m in Sources */,
+				AE99FF652277809B00937601 /* PietRenderer.m in Sources */,
+				AE99FF692277CE7200937601 /* PietRender.metal in Sources */,
 				AE20EE122277739F00207011 /* AppDelegate.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

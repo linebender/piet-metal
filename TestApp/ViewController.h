@@ -2,8 +2,9 @@
 
 #import <Cocoa/Cocoa.h>
 
-@interface ViewController : NSViewController
+@import MetalKit;
 
+@interface ViewController : NSViewController
 
 @end
 
