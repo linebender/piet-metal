@@ -31,14 +31,18 @@ fragment float4 fragmentShader(RenderData in [[stage_in]],
 
 kernel void
 renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
-             device ushort4 *scene [[buffer(0)]],
-             uint2 gid [[thread_position_in_grid]])
+             device ushort4 *tiles [[buffer(0)]],
+             uint2 gid [[thread_position_in_grid]],
+             uint2 tgid [[threadgroup_position_in_grid]])
 {
+    uint tileIx = tgid.y * maxTilesWidth + tgid.x;
+    device ushort4 *src = tiles + tileIx * (tileBufSize / 2);
     uint x = gid.x;
     uint y = gid.y;
     half3 rgb = half3((x & 255) / 255.0, (y & 255) / 255.0, 0);
-    for (int i = 0; i < 256; i++) {
-        ushort4 bbox = scene[i];
+    uint n = src[0].x;
+    for (uint i = 1; i < n; i++) {
+        ushort4 bbox = src[i];
         if (x >= bbox.x && x < bbox.z && y >= bbox.y && y < bbox.w) {
             float x0 = bbox.x;
             float y0 = bbox.y;
@@ -59,8 +63,20 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
 }
 
 kernel void
-tileKernel(device float *scene [[buffer(0)]],
-           device float *tiles [[buffer(1)]])
+tileKernel(device ushort4 *scene [[buffer(0)]],
+           device ushort4 *tiles [[buffer(1)]],
+           uint2 gid [[thread_position_in_grid]])
 {
-    
+    uint tileIx = gid.y * maxTilesWidth + gid.x;
+    ushort x0 = gid.x * tileWidth;
+    ushort y0 = gid.y * tileHeight;
+    device ushort4 *dst = tiles + tileIx * (tileBufSize / 2);
+    int j = 1;
+    for (int i = 0; i < nCircles; i++) {
+        ushort4 bbox = scene[i];
+        if (bbox.z >= x0 && bbox.x < x0 + tileWidth && bbox.w >= y0 && bbox.y < y0 + tileHeight) {
+            dst[j++] = bbox;
+        }
+    }
+    dst[0] = ushort4(j, 0, 0, 0);
 }

@@ -30,3 +30,7 @@ typedef enum RenderVertexInputIndex
 // they need to be dynamic.
 #define maxTilesWidth 256
 #define maxTilesHeight 256
+
+// Number of circles in the scene. Needs to be stored in the scene but
+// is a define for expedience.
+#define nCircles 256

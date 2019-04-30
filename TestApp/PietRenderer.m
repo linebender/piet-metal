@@ -7,6 +7,7 @@
 
 @implementation PietRenderer {
     id<MTLDevice> _device;
+    id<MTLComputePipelineState> _tilePipelineState;
     id<MTLComputePipelineState> _computePipelineState;
     id<MTLRenderPipelineState> _renderPipelineState;
     id<MTLCommandQueue> _commandQueue;
@@ -26,15 +27,17 @@
         mtkView.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
         id<MTLLibrary> defaultLibrary = [_device newDefaultLibrary];
         MTLRenderPipelineDescriptor *pipelineDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
+        id<MTLFunction> tileFunction = [defaultLibrary newFunctionWithName:@"tileKernel"];
         id<MTLFunction> kernelFunction = [defaultLibrary newFunctionWithName:@"renderKernel"];
         id<MTLFunction> vertexFunction = [defaultLibrary newFunctionWithName:@"vertexShader"];
         id<MTLFunction> fragmentFunction = [defaultLibrary newFunctionWithName:@"fragmentShader"];
         pipelineDescriptor.vertexFunction = vertexFunction;
         pipelineDescriptor.fragmentFunction = fragmentFunction;
         pipelineDescriptor.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat;
-        
+
+        _tilePipelineState = [_device newComputePipelineStateWithFunction:tileFunction error:&error];
         _computePipelineState = [_device newComputePipelineStateWithFunction:kernelFunction error:&error];
-        if (!_computePipelineState) {
+        if (!_tilePipelineState || !_computePipelineState) {
             NSLog(@"Failed to create compute pipeline state, error %@", error);
             return nil;
         }
@@ -71,16 +74,30 @@
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     commandBuffer.label = @"RenderCommand";
 
-    // Run compute shader.
+    uint nTilesX = (_viewportSize.x + tileWidth - 1) / tileWidth;
+    uint nTilesY = (_viewportSize.y + tileHeight - 1) / tileHeight;
+
+    uint nTilerGroupsX = (nTilesX + tilerGroupWidth - 1) / tilerGroupWidth;
+    uint nTilerGroupsY = (nTilesY + tilerGroupHeight - 1) / tilerGroupHeight;
+
+    // Run tile compute shader.
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
-    [computeEncoder setComputePipelineState:_computePipelineState];
+    [computeEncoder setComputePipelineState:_tilePipelineState];
     [computeEncoder setTexture:_texture atIndex:0];
     [computeEncoder setBuffer:_sceneBuf offset:0 atIndex:0];
-    MTLSize threadgroupSize = MTLSizeMake(16, 16, 1);
-    MTLSize threadgroupCount = MTLSizeMake(
-                                           (_viewportSize.x + threadgroupSize.width - 1) / threadgroupSize.width,
-                                           (_viewportSize.y + threadgroupSize.height - 1) / threadgroupSize.height,
-                                           1);
+    [computeEncoder setBuffer:_tileBuf offset:0 atIndex:1];
+    MTLSize tilegroupSize = MTLSizeMake(tilerGroupWidth, tilerGroupHeight, 1);
+    MTLSize tilegroupCount = MTLSizeMake(nTilerGroupsX, nTilerGroupsY, 1);
+    [computeEncoder dispatchThreadgroups:tilegroupCount threadsPerThreadgroup:tilegroupSize];
+    [computeEncoder endEncoding];
+
+    // Run compute shader for rendering.
+    computeEncoder = [commandBuffer computeCommandEncoder];
+    [computeEncoder setComputePipelineState:_computePipelineState];
+    [computeEncoder setTexture:_texture atIndex:0];
+    [computeEncoder setBuffer:_tileBuf offset:0 atIndex:0];
+    MTLSize threadgroupSize = MTLSizeMake(tileWidth, tileHeight, 1);
+    MTLSize threadgroupCount = MTLSizeMake(nTilesX, nTilesY, 1);
     [computeEncoder dispatchThreadgroups:threadgroupCount threadsPerThreadgroup:threadgroupSize];
     [computeEncoder endEncoding];
     
@@ -117,7 +134,6 @@
 }
 
 - (void)initScene {
-    const int nCircles = 256;
     const int radius = 8;
     uint16_t *bboxBuf = (uint16_t *)_sceneBuf.contents;
     for (int i = 0; i < nCircles; i++) {
