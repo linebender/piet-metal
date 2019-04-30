@@ -11,6 +11,8 @@
     id<MTLRenderPipelineState> _renderPipelineState;
     id<MTLCommandQueue> _commandQueue;
     id<MTLTexture> _texture;
+    id<MTLBuffer> _sceneBuf;
+    id<MTLBuffer> _tileBuf;
     vector_uint2 _viewportSize;
 }
 
@@ -39,6 +41,12 @@
         _renderPipelineState = [_device newRenderPipelineStateWithDescriptor:pipelineDescriptor error: &error];
 
         _commandQueue = [_device newCommandQueue];
+        
+        NSUInteger tileBufSizeBytes = maxTilesWidth * maxTilesHeight * tileBufSize * 4;
+        // Note: consider using managed here, worth experimenting with.
+        MTLResourceOptions sceneOptions = MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined;
+        _sceneBuf = [_device newBufferWithLength:16*1024*1024 options:sceneOptions];
+        _tileBuf = [_device newBufferWithLength:tileBufSizeBytes options:MTLResourceStorageModePrivate];
     }
     return self;
 }
@@ -67,6 +75,7 @@
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
     [computeEncoder setComputePipelineState:_computePipelineState];
     [computeEncoder setTexture:_texture atIndex:0];
+    [computeEncoder setBuffer:_sceneBuf offset:0 atIndex:0];
     MTLSize threadgroupSize = MTLSizeMake(16, 16, 1);
     MTLSize threadgroupCount = MTLSizeMake(
                                            (_viewportSize.x + threadgroupSize.width - 1) / threadgroupSize.width,
@@ -103,6 +112,22 @@
     descriptor.height = _viewportSize.y;
     descriptor.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
     _texture = [_device newTextureWithDescriptor:descriptor];
+    
+    [self initScene];
+}
+
+- (void)initScene {
+    const int nCircles = 256;
+    const int radius = 8;
+    uint16_t *bboxBuf = (uint16_t *)_sceneBuf.contents;
+    for (int i = 0; i < nCircles; i++) {
+        uint32_t x = arc4random() % _viewportSize.x;
+        uint32_t y = arc4random() % _viewportSize.y;
+        bboxBuf[i * 4 + 0] = x >= radius ? x - radius : 0;
+        bboxBuf[i * 4 + 1] = y >= radius ? y - radius : 0;
+        bboxBuf[i * 4 + 2] = x + radius < _viewportSize.x ? x + radius : _viewportSize.x;
+        bboxBuf[i * 4 + 3] = y + radius < _viewportSize.y ? y + radius : _viewportSize.y;
+    }
 }
 
 @end

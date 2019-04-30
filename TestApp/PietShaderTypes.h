@@ -12,3 +12,21 @@ typedef enum RenderVertexInputIndex
 {
     RenderVertexInputIndexVertices = 0,
 } RenderVertexInputIndex;
+
+// Size in pixels of an individual tile
+#define tileWidth 16
+#define tileHeight 16
+
+// Size (in tiles) of a threadgroup for tiling
+#define tilerGroupWidth 16
+#define tilerGroupHeight 16
+
+// The number of words in a buffer for a single tile.
+// For prototyping, this is a hard maximum, but for production we'd want
+// a mechanism to overflow.
+#define tileBufSize 1024
+
+// For simplicity, we're going to hardcode these dimensions. For production,
+// they need to be dynamic.
+#define maxTilesWidth 256
+#define maxTilesHeight 256
