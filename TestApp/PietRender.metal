@@ -66,30 +66,40 @@ kernel void
 tileKernel(device ushort4 *scene [[buffer(0)]],
            device ushort4 *tiles [[buffer(1)]],
            uint2 gid [[thread_position_in_grid]],
+           uint tgix [[simdgroup_index_in_threadgroup]],
            uint tix [[thread_index_in_simdgroup]])
 {
+    threadgroup uint bitmap[8];
+
     uint tileIx = gid.y * maxTilesWidth + gid.x;
     ushort x0 = gid.x * tileWidth;
     ushort y0 = gid.y * tileHeight;
     device ushort4 *dst = tiles + tileIx * (tileBufSize / 2);
-    
-    ushort sx0 = (gid.x & ~15) * tileWidth;
-    ushort sy0 = (gid.y & ~1) * tileHeight;
-    const ushort stw = 16 * 16;
-    const ushort sth = 2 * 16;
+
+    ushort tgx0 = (gid.x & ~15) * tileWidth;
+    ushort tgy0 = (gid.y & ~15) * tileHeight;
+    const ushort tgtw = 16 * 16;
+    const ushort tgth = 16 * 16;
     uint j = 1;
-    for (uint i = 0; i < nCircles; i += 32) {
-        ushort4 bbox = scene[i + tix];
-        simd_vote vote = simd_ballot(bbox.z >= sx0 && bbox.x < sx0 + stw && bbox.w >= sy0 && bbox.y < sy0 + sth);
-        uint v = simd_vote::vote_t(vote);
-        while (v) {
-            uint k = ctz(v);
-            bbox = scene[i + k];
-            if (bbox.z >= x0 && bbox.x < x0 + tileWidth && bbox.w >= y0 && bbox.y < y0 + tileHeight) {
-                dst[j++] = bbox;
-            }
-            v &= ~(1 << k);  // aka v &= (v - 1)
+    for (uint i = 0; i < nCircles; i += 256) {
+        ushort4 bbox = scene[i + tgix * 32 + tix];
+        simd_vote vote = simd_ballot(bbox.z >= tgx0 && bbox.x < tgx0 + tgtw && bbox.w >= tgy0 && bbox.y < tgy0 + tgth);
+        if (tix == 0) {
+            bitmap[tgix & 7] = simd_vote::vote_t(vote);
         }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (uint slice = 0; slice < 8; slice++) {
+            uint v = bitmap[slice];
+            while (v) {
+                uint k = ctz(v);
+                bbox = scene[i + slice * 32 + k];
+                if (bbox.z >= x0 && bbox.x < x0 + tileWidth && bbox.w >= y0 && bbox.y < y0 + tileHeight) {
+                    dst[j++] = bbox;
+                }
+                v &= ~(1 << k);  // aka v &= (v - 1)
+            }
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
     }
     dst[0] = ushort4(j, 0, 0, 0);
 }
