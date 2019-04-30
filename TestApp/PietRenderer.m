@@ -134,7 +134,7 @@
 }
 
 - (void)initScene {
-    const int radius = 8;
+    const int radius = 100;
     uint16_t *bboxBuf = (uint16_t *)_sceneBuf.contents;
     for (int i = 0; i < nCircles; i++) {
         uint32_t x = arc4random() % _viewportSize.x;

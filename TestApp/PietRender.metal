@@ -55,7 +55,7 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
             float r = sqrt(dx * dx + dy * dy);
             // I should make this shade an ellipse properly but am too lazy.
             float circleR = min(xc - x0, yc - y0);
-            float alpha = saturate(circleR - r);
+            float alpha = 0.5 * saturate(circleR - r);
             rgb = mix(rgb, half3(1), alpha);
         }
     }

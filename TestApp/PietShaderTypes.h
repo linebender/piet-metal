@@ -33,4 +33,4 @@ typedef enum RenderVertexInputIndex
 
 // Number of circles in the scene. Needs to be stored in the scene but
 // is a define for expedience.
-#define nCircles 256
+#define nCircles 1024
