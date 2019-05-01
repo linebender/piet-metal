@@ -15,6 +15,7 @@
 		AE99FF612277800100937601 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = AE99FF5E2277800100937601 /* README.md */; };
 		AE99FF652277809B00937601 /* PietRenderer.m in Sources */ = {isa = PBXBuildFile; fileRef = AE99FF642277809B00937601 /* PietRenderer.m */; };
 		AE99FF692277CE7200937601 /* PietRender.metal in Sources */ = {isa = PBXBuildFile; fileRef = AE99FF682277CE7200937601 /* PietRender.metal */; };
+		AEA81C9C227A698E0051DAD5 /* SceneEncoder.m in Sources */ = {isa = PBXBuildFile; fileRef = AEA81C9B227A698E0051DAD5 /* SceneEncoder.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +34,8 @@
 		AE99FF66227780B000937601 /* PietRenderer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PietRenderer.h; sourceTree = "<group>"; };
 		AE99FF672277CDF200937601 /* PietShaderTypes.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PietShaderTypes.h; sourceTree = "<group>"; };
 		AE99FF682277CE7200937601 /* PietRender.metal */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.metal; path = PietRender.metal; sourceTree = "<group>"; };
+		AEA81C9B227A698E0051DAD5 /* SceneEncoder.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SceneEncoder.m; sourceTree = "<group>"; };
+		AEA81C9D227A69B50051DAD5 /* SceneEncoder.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SceneEncoder.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -77,6 +80,8 @@
 				AE99FF66227780B000937601 /* PietRenderer.h */,
 				AE99FF642277809B00937601 /* PietRenderer.m */,
 				AE99FF672277CDF200937601 /* PietShaderTypes.h */,
+				AEA81C9D227A69B50051DAD5 /* SceneEncoder.h */,
+				AEA81C9B227A698E0051DAD5 /* SceneEncoder.m */,
 				AE20EE132277739F00207011 /* ViewController.h */,
 				AE20EE142277739F00207011 /* ViewController.m */,
 			);
@@ -156,6 +161,7 @@
 				AE20EE152277739F00207011 /* ViewController.m in Sources */,
 				AE20EE1D227773A000207011 /* main.m in Sources */,
 				AE99FF652277809B00937601 /* PietRenderer.m in Sources */,
+				AEA81C9C227A698E0051DAD5 /* SceneEncoder.m in Sources */,
 				AE99FF692277CE7200937601 /* PietRender.metal in Sources */,
 				AE20EE122277739F00207011 /* AppDelegate.m in Sources */,
 			);

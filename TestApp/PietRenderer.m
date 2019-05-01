@@ -4,6 +4,7 @@
 
 #import "PietRenderer.h"
 #import "PietShaderTypes.h"
+#import "SceneEncoder.h"
 
 @implementation PietRenderer {
     id<MTLDevice> _device;
@@ -22,8 +23,7 @@
     if (self) {
         NSError *error = NULL;
         _device = mtkView.device;
-        // Note: consider sRGB here (though ultimately there are complex questions where in the
-        // pipeline these conversions should be).
+        // Note: this is consciously not sRGB, we do the conversion before writing the texture.
         mtkView.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
         id<MTLLibrary> defaultLibrary = [_device newDefaultLibrary];
         MTLRenderPipelineDescriptor *pipelineDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
@@ -45,7 +45,7 @@
 
         _commandQueue = [_device newCommandQueue];
         
-        NSUInteger tileBufSizeBytes = maxTilesWidth * maxTilesHeight * tileBufSize * 4;
+        NSUInteger tileBufSizeBytes = maxTilesWidth * maxTilesHeight * tileBufSize;
         // Note: consider using managed here, worth experimenting with.
         MTLResourceOptions sceneOptions = MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined;
         _sceneBuf = [_device newBufferWithLength:16*1024*1024 options:sceneOptions];
@@ -135,15 +135,15 @@
 
 - (void)initScene {
     const int radius = 8;
-    uint16_t *bboxBuf = (uint16_t *)_sceneBuf.contents;
-    for (int i = 0; i < nCircles; i++) {
+    const int n = 256;
+    SceneEncoder *encoder = [[SceneEncoder alloc] initWithBuffer:_sceneBuf];
+    [encoder beginGroup:n];
+    for (int i = 0; i < n; i++) {
         uint32_t x = arc4random() % _viewportSize.x;
         uint32_t y = arc4random() % _viewportSize.y;
-        bboxBuf[i * 4 + 0] = x >= radius ? x - radius : 0;
-        bboxBuf[i * 4 + 1] = y >= radius ? y - radius : 0;
-        bboxBuf[i * 4 + 2] = x + radius < _viewportSize.x ? x + radius : _viewportSize.x;
-        bboxBuf[i * 4 + 3] = y + radius < _viewportSize.y ? y + radius : _viewportSize.y;
+        [encoder circle:simd_make_float2(x, y) radius:radius];
     }
+    [encoder endGroup];
 }
 
 @end

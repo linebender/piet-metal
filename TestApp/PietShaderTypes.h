@@ -21,10 +21,10 @@ typedef enum RenderVertexInputIndex
 #define tilerGroupWidth 16
 #define tilerGroupHeight 16
 
-// The number of words in a buffer for a single tile.
+// The number of bytes in a buffer for a single tile.
 // For prototyping, this is a hard maximum, but for production we'd want
 // a mechanism to overflow.
-#define tileBufSize 1024
+#define tileBufSize 4096
 
 // For simplicity, we're going to hardcode these dimensions. For production,
 // they need to be dynamic.
@@ -34,3 +34,22 @@ typedef enum RenderVertexInputIndex
 // Number of circles in the scene. Needs to be stored in the scene but
 // is a define for expedience.
 #define nCircles 256
+
+typedef struct SimpleGroup {
+    uint nItems;
+    // index (in 32 bit words) to items
+    // Might switch this to bytes.
+    uint itemsIx;
+    vector_ushort4 bbox[1];
+} SimpleGroup;
+
+typedef struct PietCircle {
+    uint itemType;
+} PietCircle;
+
+typedef union PietItem {
+    PietCircle circle;
+} PietItem;
+
+// This should be an enum but the storage needs to be of fixed size
+#define PIET_ITEM_CIRCLE 1
