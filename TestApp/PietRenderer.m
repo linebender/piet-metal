@@ -133,17 +133,39 @@
     [self initScene];
 }
 
+- (void)initCardioid {
+    float cx = 1024;
+    float cy = 768;
+    float r = 750;
+    int n = 97;
+    SceneEncoder *encoder = [[SceneEncoder alloc] initWithBuffer:_sceneBuf];
+    [encoder beginGroup: 2 * (n - 1)];
+    for (int i = 1; i < n; i++) {
+        float th0 = 2 * M_PI * i / n;
+        float th1 = 2 * M_PI * ((i * 2) % n) / n;
+        vector_float2 start = simd_make_float2(cx + r * cos(th0), cy - r * sin(th0));
+        vector_float2 end = simd_make_float2(cx + r * cos(th1), cy - r * sin(th1));
+        [encoder circle:start radius: 8];
+        [encoder line:start to:end width:2 color:0x800000];
+    }
+    [encoder endGroup];
+}
+
 - (void)initScene {
+    /*
     const int radius = 8;
     const int n = 256;
     SceneEncoder *encoder = [[SceneEncoder alloc] initWithBuffer:_sceneBuf];
-    [encoder beginGroup:n];
+    [encoder beginGroup:n + 1];
     for (int i = 0; i < n; i++) {
         uint32_t x = arc4random() % _viewportSize.x;
         uint32_t y = arc4random() % _viewportSize.y;
         [encoder circle:simd_make_float2(x, y) radius:radius];
     }
+    [encoder line:simd_make_float2(100, 500) to:simd_make_float2(700, 600) width:100 color:0x800000];
     [encoder endGroup];
+    */
+    [self initCardioid];
 }
 
 @end

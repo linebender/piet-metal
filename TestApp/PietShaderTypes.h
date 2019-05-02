@@ -37,19 +37,31 @@ typedef enum RenderVertexInputIndex
 
 typedef struct SimpleGroup {
     uint nItems;
-    // index (in 32 bit words) to items
-    // Might switch this to bytes.
+    // Offset in bytes to items
     uint itemsIx;
     vector_ushort4 bbox[1];
 } SimpleGroup;
+
+// A single line to be stroked, with default parameters
+typedef struct PietStrokeLine {
+    uint itemType;
+    uint flags; // reserved, partially for alignment
+    uint rgbaColor;
+    float width;
+    vector_float2 start;
+    vector_float2 end;
+} PietStrokeLine;
 
 typedef struct PietCircle {
     uint itemType;
 } PietCircle;
 
 typedef union PietItem {
+    uint itemType;
     PietCircle circle;
+    PietStrokeLine line;
 } PietItem;
 
 // This should be an enum but the storage needs to be of fixed size
 #define PIET_ITEM_CIRCLE 1
+#define PIET_ITEM_LINE 2
