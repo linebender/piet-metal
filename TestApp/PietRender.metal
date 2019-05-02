@@ -153,10 +153,29 @@ tileKernel(device const char *scene [[buffer(0)]],
                     case PIET_ITEM_CIRCLE:
                         encoder.encodeCircle(bbox);
                         break;
-                    case PIET_ITEM_LINE:
-                        encoder.encodeLine(items[ix].line);
-                        encoder.encodeStroke(items[ix].line);
+                    case PIET_ITEM_LINE: {
+                        // set up line equation, ax + by + c = 0
+                        device const PietStrokeLine &line = items[ix].line;
+                        float a = line.end.y - line.start.y;
+                        float b = line.start.x - line.end.x;
+                        float c = -(a * line.start.x + b * line.start.y);
+                        // TODO: is this bound as tight as it can be?
+                        float hw = 0.5 * line.width + 0.5;
+                        float left = a * (x0 - hw);
+                        float right = a * (x0 + tileWidth + hw);
+                        float top = b * (y0 - hw);
+                        float bot = b * (y0 + tileHeight + hw);
+                        // If all four corners are on same side of line, cull
+                        float s00 = sign(top + left + c);
+                        float s01 = sign(top + right + c);
+                        float s10 = sign(bot + left + c);
+                        float s11 = sign(bot + right + c);
+                        if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
+                            encoder.encodeLine(line);
+                            encoder.encodeStroke(line);
+                        }
                         break;
+                    }
                 }
             }
             v &= ~(1 << k);  // aka v &= (v - 1)
