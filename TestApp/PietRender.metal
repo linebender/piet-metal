@@ -218,7 +218,7 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
     }
     // Linear to sRGB conversion. Note that if we had writable sRGB textures
     // we could let this be done in the write call.
-    rgb = select(pow(rgb, 1/2.4) - 0.055, 12.92 * rgb, rgb < 0.0031308);
+    rgb = select(1.055 * pow(rgb, 1/2.4) - 0.055, 12.92 * rgb, rgb < 0.0031308);
     half4 rgba = half4(rgb, 1.0);
     outTexture.write(rgba, gid);
 }
