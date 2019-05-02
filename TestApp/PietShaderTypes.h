@@ -31,16 +31,16 @@ typedef enum RenderVertexInputIndex
 #define maxTilesWidth 256
 #define maxTilesHeight 256
 
-// Number of circles in the scene. Needs to be stored in the scene but
-// is a define for expedience.
-#define nCircles 256
-
 typedef struct SimpleGroup {
     uint nItems;
     // Offset in bytes to items
     uint itemsIx;
     vector_ushort4 bbox[1];
 } SimpleGroup;
+
+typedef struct PietCircle {
+    uint itemType;
+} PietCircle;
 
 // A single line to be stroked, with default parameters
 typedef struct PietStrokeLine {
@@ -52,16 +52,22 @@ typedef struct PietStrokeLine {
     vector_float2 end;
 } PietStrokeLine;
 
-typedef struct PietCircle {
+typedef struct PietFill {
     uint itemType;
-} PietCircle;
+    uint flags; // will be used for winding number rule
+    uint rgbaColor;
+    uint nPoints;
+    uint pointsIx;
+} PietFill;
 
 typedef union PietItem {
     uint itemType;
     PietCircle circle;
     PietStrokeLine line;
+    PietFill fill;
 } PietItem;
 
 // This should be an enum but the storage needs to be of fixed size
 #define PIET_ITEM_CIRCLE 1
 #define PIET_ITEM_LINE 2
+#define PIET_ITEM_FILL 3

@@ -54,21 +54,40 @@ struct CmdEnd {
     ushort cmd;
 };
 
+// Render a circle. Used mainly for debugging (color is fixed and
+// coordinates are limited to integers), but could be adapted to
+// real use.
 struct CmdCircle {
     ushort cmd;
     packed_ushort4 bbox;
 };
 
+// Render one line segment to the distance field buffer.
 struct CmdLine {
     ushort cmd;
     packed_float2 start;
     packed_float2 end;
 };
 
+// Draw a stroke based on the distance field buffer.
 struct CmdStroke {
     ushort cmd;
-    uint rgba;
     half halfWidth;
+    uint rgba;
+};
+
+// Accumulate one line segment to the signed area buffer.
+struct CmdFill {
+    ushort cmd;
+    packed_float2 start;
+    packed_float2 end;
+};
+
+// Draw a fill based on the signed area buffer.
+struct CmdDrawFill {
+    ushort cmd;
+    short backdrop;
+    uint rgba;
 };
 
 // Maybe these should be an enum.
@@ -76,6 +95,8 @@ struct CmdStroke {
 #define CMD_CIRCLE 1
 #define CMD_LINE 2
 #define CMD_STROKE 3
+#define CMD_FILL 4
+#define CMD_DRAW_FILL 5
 
 struct TileEncoder {
 public:
@@ -101,6 +122,20 @@ public:
         cmd->rgba = line.rgbaColor;
         cmd->halfWidth = 0.5 * line.width;
         dst += sizeof(CmdStroke);
+    }
+    void encodeFill(float2 start, float2 end) {
+        device CmdFill *cmd = (device CmdFill *)dst;
+        cmd->cmd = CMD_FILL;
+        cmd->start = start;
+        cmd->end = end;
+        dst += sizeof(CmdFill);
+    }
+    void encodeDrawFill(const device PietFill &fill, int backdrop) {
+        device CmdDrawFill *cmd = (device CmdDrawFill *)dst;
+        cmd->cmd = CMD_DRAW_FILL;
+        cmd->backdrop = backdrop;
+        cmd->rgba = fill.rgbaColor;
+        dst += sizeof(CmdDrawFill);
     }
     void end() {
         device CmdEnd *cmd = (device CmdEnd *)dst;
@@ -176,6 +211,18 @@ tileKernel(device const char *scene [[buffer(0)]],
                         }
                         break;
                     }
+                    case PIET_ITEM_FILL: {
+                        device const PietFill &fill = items[ix].fill;
+                        device const float2 *pts = (device const float2 *)(scene + fill.pointsIx);
+                        uint nPoints = fill.nPoints;
+                        for (uint j = 0; j < nPoints; j++) {
+                            float2 start = pts[j];
+                            float2 end = pts[j + 1 == nPoints ? 0 : j + 1];
+                            encoder.encodeFill(start, end);
+                        }
+                        encoder.encodeDrawFill(fill, 0);
+                        break;
+                    }
                 }
             }
             v &= ~(1 << k);  // aka v &= (v - 1)
@@ -198,8 +245,9 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
     float2 xy = float2(x, y);
 
     // Render state (maybe factor out?)
-    half3 rgb = half3(1);
+    half3 rgb = half3(1.0);
     float df = 1e9;
+    half signedArea = 0.0;
 
     ushort cmd;
     while ((cmd = *(const device ushort *)src) != CMD_END) {
@@ -213,9 +261,10 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 float2 center = mix(xy0, xy1, 0.5);
                 float r = length(xy - center);
                 // I should make this shade an ellipse properly but am too lazy.
+                // But see WebRender ellipse.glsl (linked in notes)
                 float circleR = min(center.x - xy0.x, center.y - xy0.y);
                 float alpha = saturate(circleR - r);
-                rgb = mix(rgb, half3(0), alpha);
+                rgb = mix(rgb, half3(0.0), alpha);
                 break;
             }
             case CMD_LINE: {
@@ -228,9 +277,44 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 const device CmdStroke *stroke = (const device CmdStroke *)src;
                 src += sizeof(CmdStroke);
                 half alpha = renderDf(df, stroke->halfWidth);
-                half3 fg = unpack_unorm4x8_srgb_to_half(stroke->rgba).xyz;
+                half4 fg = unpack_unorm4x8_srgb_to_half(stroke->rgba);
+                rgb = mix(rgb, fg.rgb, fg.a * alpha);
                 df = 1e9;
-                rgb = mix(rgb, fg, alpha);
+                break;
+            }
+            case CMD_FILL: {
+                const device CmdFill *fill = (const device CmdFill *)src;
+                src += sizeof(CmdFill);
+                float2 start = fill->start - xy;
+                float2 end = fill->end - xy;
+                float2 window = saturate(float2(start.y, end.y));
+                // maybe should be an epsilon test for better numerical stability
+                if (window.x != window.y) {
+                    float2 t = (window - start.y) / (end.y - start.y);
+                    float2 xs = mix(float2(start.x), float2(end.x), t);
+                    // This fudge factor might be inadequate when xmax is large, could
+                    // happen with small slopes.
+                    float xmin = min(min(xs.x, xs.y), 1.0) - 1e-6;
+                    float xmax = max(xs.x, xs.y);
+                    float b = min(xmax, 1.0);
+                    float c = max(b, 0.0);
+                    float d = max(xmin, 0.0);
+                    float area = (b + 0.5 * (d * d - c * c) - xmin) / (xmax - xmin);
+                    // TODO: evaluate accuracy loss from more use of half
+                    signedArea += half(area * (window.x - window.y));
+                }
+                break;
+            }
+            case CMD_DRAW_FILL: {
+                const device CmdDrawFill *draw = (const device CmdDrawFill *)src;
+                src += sizeof(CmdDrawFill);
+                half alpha = signedArea + half(draw->backdrop);
+                alpha = min(abs(alpha), 1.0h); // nonzero winding rule
+                // even-odd is: alpha = abs(alpha - 2.0 * round(0.5 * alpha))
+                // also: abs(2 * fract(0.5 * (x - 1.0)) - 1.0)
+                half4 fg = unpack_unorm4x8_srgb_to_half(draw->rgba);
+                rgb = mix(rgb, fg.rgb, fg.a * alpha);
+                signedArea = 0.0;
                 break;
             }
         }
