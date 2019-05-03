@@ -83,6 +83,15 @@ struct CmdFill {
     packed_float2 end;
 };
 
+// Accumulate line intersecting the left edge of a tile to the signed area buffer.
+struct CmdFillEdge {
+    ushort cmd;
+    // This is only one bit, it's a bit wasteful
+    float sign;
+    // Y coordinate at point of intersection with left edge.
+    float y;
+};
+
 // Draw a fill based on the signed area buffer.
 struct CmdDrawFill {
     ushort cmd;
@@ -96,7 +105,8 @@ struct CmdDrawFill {
 #define CMD_LINE 2
 #define CMD_STROKE 3
 #define CMD_FILL 4
-#define CMD_DRAW_FILL 5
+#define CMD_FILL_EDGE 5
+#define CMD_DRAW_FILL 6
 
 struct TileEncoder {
 public:
@@ -129,6 +139,13 @@ public:
         cmd->start = start;
         cmd->end = end;
         dst += sizeof(CmdFill);
+    }
+    void encodeFillEdge(float sign, float y) {
+        device CmdFillEdge *cmd = (device CmdFillEdge *)dst;
+        cmd->cmd = CMD_FILL_EDGE;
+        cmd->sign = sign;
+        cmd->y = y;
+        dst += sizeof(CmdFillEdge);
     }
     void encodeDrawFill(const device PietFill &fill, int backdrop) {
         device CmdDrawFill *cmd = (device CmdDrawFill *)dst;
@@ -215,12 +232,58 @@ tileKernel(device const char *scene [[buffer(0)]],
                         device const PietFill &fill = items[ix].fill;
                         device const float2 *pts = (device const float2 *)(scene + fill.pointsIx);
                         uint nPoints = fill.nPoints;
+                        float backdrop = 0;
+                        bool anyFill = false;
+                        // TODO: use simd ballot to quick-reject segments with no contribution
                         for (uint j = 0; j < nPoints; j++) {
                             float2 start = pts[j];
                             float2 end = pts[j + 1 == nPoints ? 0 : j + 1];
-                            encoder.encodeFill(start, end);
+                            float ymin = min(start.y, end.y);
+                            float ymax = max(start.y, end.y);
+                            if (ymax >= y0 && ymin < y0 + tileHeight) {
+                                // set up line equation, ax + by + c = 0
+                                float a = end.y - start.y;
+                                float b = start.x - end.x;
+                                float c = -(a * start.x + b * start.y);
+                                float left = a * x0;
+                                float right = a * (x0 + tileWidth);
+                                float ytop = max(float(y0), ymin);
+                                float ybot = min(float(y0 + tileHeight), ymax);
+                                float top = b * ytop;
+                                float bot = b * ybot;
+                                // top left of tile
+                                float sTopLeft = sign(left + float(y0) * b + c);
+                                float s00 = sign(top + left + c);
+                                float s01 = sign(top + right + c);
+                                float s10 = sign(bot + left + c);
+                                float s11 = sign(bot + right + c);
+                                if (sTopLeft == sign(a) && min(start.x, end.x) <= x0) {
+                                    backdrop -= s00;
+                                }
+                                if (min(start.x, end.x) < x0 && max(start.x, end.x) > x0) {
+                                    float yEdge = mix(start.y, end.y, (start.x - x0) / b);
+                                    if (yEdge >= y0 && yEdge < y0 + tileHeight) {
+                                        // line intersects left edge of this tile
+                                        encoder.encodeFillEdge(s00, yEdge);
+                                        if (b > 0.0) {
+                                            encoder.encodeFill(start, float2(x0, yEdge));
+                                        } else {
+                                            encoder.encodeFill(float2(x0, yEdge), end);
+                                        }
+                                        anyFill = true;
+                                    } else if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
+                                        encoder.encodeFill(start, end);
+                                        anyFill = true;
+                                    }
+                                } else if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
+                                    encoder.encodeFill(start, end);
+                                    anyFill = true;
+                                }
+                            }
                         }
-                        encoder.encodeDrawFill(fill, 0);
+                        if (anyFill || backdrop != 0.0) {
+                            encoder.encodeDrawFill(fill, backdrop);
+                        }
                         break;
                     }
                 }
@@ -303,6 +366,12 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                     // TODO: evaluate accuracy loss from more use of half
                     signedArea += half(area * (window.x - window.y));
                 }
+                break;
+            }
+            case CMD_FILL_EDGE: {
+                const device CmdFillEdge *fill = (const device CmdFillEdge *)src;
+                src += sizeof(CmdFillEdge);
+                signedArea += fill->sign * saturate(y - fill->y + 1);
                 break;
             }
             case CMD_DRAW_FILL: {

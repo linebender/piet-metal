@@ -152,12 +152,17 @@
 }
 
 - (void)fillTest {
+    const int n = 256;
     SceneEncoder *encoder = [[SceneEncoder alloc] initWithBuffer:_sceneBuf];
-    [encoder beginGroup: 1];
-    [encoder addPt:simd_make_float2(10.0, 10.0)];
-    [encoder addPt:simd_make_float2(30.0, 110.0)];
-    [encoder addPt:simd_make_float2(150.0, 30.0)];
-    [encoder fill:0xff000000];
+    [encoder beginGroup: n];
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < 3; j++) {
+            uint32_t x = arc4random() % _viewportSize.x;
+            uint32_t y = arc4random() % _viewportSize.y;
+            [encoder addPt:simd_make_float2(x, y)];
+        }
+        [encoder fill:arc4random() | 0xff000000];
+    }
     [encoder endGroup];
 }
 
