@@ -257,7 +257,7 @@ tileKernel(device const char *scene [[buffer(0)]],
                                 float s01 = sign(top + right + c);
                                 float s10 = sign(bot + left + c);
                                 float s11 = sign(bot + right + c);
-                                if (sTopLeft == sign(a) && min(start.x, end.x) <= x0) {
+                                if (sTopLeft == sign(a) && ymin <= y0) {
                                     backdrop -= s00;
                                 }
                                 if (min(start.x, end.x) < x0 && max(start.x, end.x) > x0) {

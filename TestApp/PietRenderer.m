@@ -4,7 +4,7 @@
 
 #import "PietRenderer.h"
 #import "PietShaderTypes.h"
-#import "SceneEncoder.h"
+#include "piet_metal.h"
 
 @implementation PietRenderer {
     id<MTLDevice> _device;
@@ -133,6 +133,7 @@
     [self initScene];
 }
 
+/*
 - (void)initCardioid {
     float cx = 1024;
     float cy = 768;
@@ -166,8 +167,7 @@
     [encoder endGroup];
 }
 
-- (void)initScene {
-    /*
+- (void)initCircles {
     const int radius = 8;
     const int n = 256;
     SceneEncoder *encoder = [[SceneEncoder alloc] initWithBuffer:_sceneBuf];
@@ -179,9 +179,17 @@
     }
     [encoder line:simd_make_float2(100, 500) to:simd_make_float2(700, 600) width:100 color:0xff800000];
     [encoder endGroup];
-    */
+}
+
+ - (void)initScene {
+    //[self initCircles];
     //[self initCardioid];
     [self fillTest];
+}
+*/
+
+- (void)initScene {
+    init_test_scene(_sceneBuf.contents, _sceneBuf.allocatedSize);
 }
 
 @end

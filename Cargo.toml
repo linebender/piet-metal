@@ -9,7 +9,9 @@ keywords = ["graphics", "2d"]
 categories = ["rendering::graphics-api"]
 
 [dependencies]
-kurbo = "0.2.1"
+# Note: 0.2.1 has some bugs, we'll do a new release soon
+#kurbo = "0.2.1"
+kurbo = { git = "https://github.com/linebender/kurbo" }
 
 [lib]
 name = "piet_metal"

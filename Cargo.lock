@@ -11,7 +11,7 @@ dependencies = [
 [[package]]
 name = "kurbo"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/linebender/kurbo#3d610b84990bfd8fde557d76fdd85e5ac15224df"
 dependencies = [
  "arrayvec 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -25,10 +25,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "piet-metal"
 version = "0.0.0"
 dependencies = [
- "kurbo 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "kurbo 0.2.1 (git+https://github.com/linebender/kurbo)",
 ]
 
 [metadata]
 "checksum arrayvec 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)" = "92c7fb76bc8826a8b33b4ee5bb07a247a81e76764ab4d55e8f73e3a4d8808c71"
-"checksum kurbo 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "2b957a4dfbd317dba024db63c05192b35156e09785fd7e026524ce5390ac6c88"
+"checksum kurbo 0.2.1 (git+https://github.com/linebender/kurbo)" = "<none>"
 "checksum nodrop 0.1.13 (registry+https://github.com/rust-lang/crates.io-index)" = "2f9667ddcc6cc8a43afc9b7917599d7216aa09c463919ea32c59ed6cac8bc945"
