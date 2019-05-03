@@ -12,11 +12,23 @@
 		AE20EE17227773A000207011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AE20EE16227773A000207011 /* Assets.xcassets */; };
 		AE20EE1A227773A000207011 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AE20EE18227773A000207011 /* Main.storyboard */; };
 		AE20EE1D227773A000207011 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = AE20EE1C227773A000207011 /* main.m */; };
+		AE95B97A227CBE5A0038195A /* piet_metal.h in Headers */ = {isa = PBXBuildFile; fileRef = AE95B979227CBE590038195A /* piet_metal.h */; };
+		AE95B981227CC0020038195A /* libpiet_metal.a in Frameworks */ = {isa = PBXBuildFile; fileRef = AE95B975227CBDCD0038195A /* libpiet_metal.a */; };
 		AE99FF612277800100937601 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = AE99FF5E2277800100937601 /* README.md */; };
 		AE99FF652277809B00937601 /* PietRenderer.m in Sources */ = {isa = PBXBuildFile; fileRef = AE99FF642277809B00937601 /* PietRenderer.m */; };
 		AE99FF692277CE7200937601 /* PietRender.metal in Sources */ = {isa = PBXBuildFile; fileRef = AE99FF682277CE7200937601 /* PietRender.metal */; };
 		AEA81C9C227A698E0051DAD5 /* SceneEncoder.m in Sources */ = {isa = PBXBuildFile; fileRef = AEA81C9B227A698E0051DAD5 /* SceneEncoder.m */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		AE95B97F227CBFEA0038195A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AE20EE052277739F00207011 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AE95B974227CBDCD0038195A;
+			remoteInfo = piet_metal;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		AE20EE0D2277739F00207011 /* piet-metal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "piet-metal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -29,6 +41,9 @@
 		AE20EE1B227773A000207011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AE20EE1C227773A000207011 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		AE20EE1E227773A000207011 /* piet_metal.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = piet_metal.entitlements; sourceTree = "<group>"; };
+		AE95B96F227CBC1B0038195A /* libpiet_metal.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libpiet_metal.a; path = target/debug/libpiet_metal.a; sourceTree = "<group>"; };
+		AE95B975227CBDCD0038195A /* libpiet_metal.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libpiet_metal.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		AE95B979227CBE590038195A /* piet_metal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = piet_metal.h; path = include/piet_metal.h; sourceTree = "<group>"; };
 		AE99FF5E2277800100937601 /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		AE99FF642277809B00937601 /* PietRenderer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PietRenderer.m; sourceTree = "<group>"; };
 		AE99FF66227780B000937601 /* PietRenderer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PietRenderer.h; sourceTree = "<group>"; };
@@ -43,6 +58,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AE95B981227CC0020038195A /* libpiet_metal.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -52,9 +68,11 @@
 		AE20EE042277739F00207011 = {
 			isa = PBXGroup;
 			children = (
+				AE95B979227CBE590038195A /* piet_metal.h */,
 				AE99FF5E2277800100937601 /* README.md */,
 				AE20EE0F2277739F00207011 /* TestApp */,
 				AE20EE0E2277739F00207011 /* Products */,
+				AE95B96E227CBC1A0038195A /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -62,6 +80,7 @@
 			isa = PBXGroup;
 			children = (
 				AE20EE0D2277739F00207011 /* piet-metal.app */,
+				AE95B975227CBDCD0038195A /* libpiet_metal.a */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -88,7 +107,26 @@
 			path = TestApp;
 			sourceTree = "<group>";
 		};
+		AE95B96E227CBC1A0038195A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				AE95B96F227CBC1B0038195A /* libpiet_metal.a */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		AE95B971227CBDCD0038195A /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AE95B97A227CBE5A0038195A /* piet_metal.h in Headers */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
 		AE20EE0C2277739F00207011 /* piet-metal */ = {
@@ -102,11 +140,28 @@
 			buildRules = (
 			);
 			dependencies = (
+				AE95B980227CBFEA0038195A /* PBXTargetDependency */,
 			);
 			name = "piet-metal";
 			productName = "piet-metal";
 			productReference = AE20EE0D2277739F00207011 /* piet-metal.app */;
 			productType = "com.apple.product-type.application";
+		};
+		AE95B974227CBDCD0038195A /* piet_metal */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AE95B976227CBDCD0038195A /* Build configuration list for PBXNativeTarget "piet_metal" */;
+			buildPhases = (
+				AE95B971227CBDCD0038195A /* Headers */,
+				AE95B97B227CBE660038195A /* ShellScript */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = piet_metal;
+			productName = piet_metal;
+			productReference = AE95B975227CBDCD0038195A /* libpiet_metal.a */;
+			productType = "com.apple.product-type.library.static";
 		};
 /* End PBXNativeTarget section */
 
@@ -118,6 +173,9 @@
 				ORGANIZATIONNAME = "Raph Levien";
 				TargetAttributes = {
 					AE20EE0C2277739F00207011 = {
+						CreatedOnToolsVersion = 10.2.1;
+					};
+					AE95B974227CBDCD0038195A = {
 						CreatedOnToolsVersion = 10.2.1;
 					};
 				};
@@ -136,6 +194,7 @@
 			projectRoot = "";
 			targets = (
 				AE20EE0C2277739F00207011 /* piet-metal */,
+				AE95B974227CBDCD0038195A /* piet_metal */,
 			);
 		};
 /* End PBXProject section */
@@ -153,6 +212,26 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		AE95B97B227CBE660038195A /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# When building from Xcode we want to ensure that `cargo` is in PATH.\n# as a convenience, add the default cargo install location\nexport PATH=\"$PATH:${HOME}/.cargo/bin\"\n\nset -e\n\nif [[ $CONFIGURATION = \"Debug\" ]]; then\nRUST_CONFIGURATION=\"debug\"\nRUST_CONFIGURATION_FLAG=\"\"\nelse\nRUST_CONFIGURATION=\"release\"\nRUST_CONFIGURATION_FLAG=\"--release\"\nfi\n\ncd \"${SRCROOT}\"\n\necho \"rust config ${RUST_CONFIGURATION}, action ${ACTION}\"\n\nif [[ ${ACTION:-build} = \"build\" ]]; then\ncargo build $RUST_CONFIGURATION_FLAG\ncp \"${SRCROOT}/target/${RUST_CONFIGURATION}/libpiet_metal.a\" \"${BUILT_PRODUCTS_DIR}/\"\n#cp \"${SRCROOT}/include/piet_metal.h\" \"${BUILT_PRODUCTS_DIR}/\"\nelif [[ $ACTION = \"clean\" ]]; then\necho \"cleaning\"\ncargo clean\nfi\n\nset +e\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		AE20EE092277739F00207011 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -168,6 +247,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AE95B980227CBFEA0038195A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AE95B974227CBDCD0038195A /* piet_metal */;
+			targetProxy = AE95B97F227CBFEA0038195A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		AE20EE18227773A000207011 /* Main.storyboard */ = {
@@ -304,6 +391,10 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/target/debug",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.levien.piet-metal";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
@@ -321,8 +412,32 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/target/debug",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.levien.piet-metal";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+		AE95B977227CBDCD0038195A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				EXECUTABLE_PREFIX = lib;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		AE95B978227CBDCD0038195A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				EXECUTABLE_PREFIX = lib;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 			};
 			name = Release;
 		};
@@ -343,6 +458,15 @@
 			buildConfigurations = (
 				AE20EE22227773A000207011 /* Debug */,
 				AE20EE23227773A000207011 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AE95B976227CBDCD0038195A /* Build configuration list for PBXNativeTarget "piet_metal" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AE95B977227CBDCD0038195A /* Debug */,
+				AE95B978227CBDCD0038195A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
