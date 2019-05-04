@@ -65,6 +65,7 @@ struct CmdCircle {
 // Render one line segment to the distance field buffer.
 struct CmdLine {
     ushort cmd;
+    ushort _padding;
     packed_float2 start;
     packed_float2 end;
 };
@@ -79,6 +80,7 @@ struct CmdStroke {
 // Accumulate one line segment to the signed area buffer.
 struct CmdFill {
     ushort cmd;
+    ushort _padding;
     packed_float2 start;
     packed_float2 end;
 };
@@ -87,7 +89,7 @@ struct CmdFill {
 struct CmdFillEdge {
     ushort cmd;
     // This is only one bit, it's a bit wasteful
-    float sign;
+    short sign;
     // Y coordinate at point of intersection with left edge.
     float y;
 };
@@ -168,7 +170,8 @@ kernel void
 tileKernel(device const char *scene [[buffer(0)]],
            device char *tiles [[buffer(1)]],
            uint2 gid [[thread_position_in_grid]],
-           uint tix [[thread_index_in_simdgroup]])
+           uint tix [[thread_index_in_simdgroup]],
+           uint sgSize [[threads_per_simdgroup]])
 {
     uint tileIx = gid.y * maxTilesWidth + gid.x;
     ushort x0 = gid.x * tileWidth;
@@ -177,8 +180,8 @@ tileKernel(device const char *scene [[buffer(0)]],
     TileEncoder encoder(dst);
     
     // Size of the region covered by one SIMD group. TODO, don't hardcode.
-    const ushort stw = 16 * 16;
-    const ushort sth = 2 * 16;
+    const ushort stw = 16 * tileWidth;
+    const ushort sth = 2 * tileHeight;
     ushort sx0 = x0 & ~(stw - 1);
     ushort sy0 = y0 & ~(sth - 1);
     
@@ -186,7 +189,7 @@ tileKernel(device const char *scene [[buffer(0)]],
     device const ushort4 *bboxes = (device const ushort4 *)&group->bbox[0];
     uint n = group->nItems;
     device const PietItem *items = (device const PietItem *)(scene + group->itemsIx);
-    for (uint i = 0; i < n; i += 32) {
+    for (uint i = 0; i < n; i += sgSize) {
         bool hit = false;
         if (i + tix < n) {
             ushort4 bbox = bboxes[i + tix];
