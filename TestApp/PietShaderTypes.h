@@ -24,7 +24,7 @@ typedef enum RenderVertexInputIndex
 // The number of bytes in a buffer for a single tile.
 // For prototyping, this is a hard maximum, but for production we'd want
 // a mechanism to overflow.
-#define tileBufSize 16384
+#define tileBufSize 4096
 
 // For simplicity, we're going to hardcode these dimensions. For production,
 // they need to be dynamic.

@@ -331,7 +331,20 @@ fn encode_path(encoder: &mut Encoder, bezpath: &BezPath, rgba: u32) {
     }
 }
 
-fn encode_path_stroke(encoder: &mut Encoder, bezpath: &BezPath, width: f32, rgba: u32) {
+// This is a tradeoff between smoothness and contrast, set by aesthetic preference. The
+// optimum rendering of very thin strokes is likely an area for further research.
+const THIN_LINE: f32 = 0.7;
+
+fn encode_path_stroke(encoder: &mut Encoder, bezpath: &BezPath, mut width: f32, mut rgba: u32) {
+    // Fudge very thin lines to get better distance field rendering.
+    if width < THIN_LINE {
+        let alpha = (rgba & 0xff) as f32;
+        // The sqrt here is to compensate for "correct" alpha blending.
+        // We probably want a more systematic approach to stroke thickening.
+        let alpha = alpha * (width / THIN_LINE).sqrt();
+        rgba = (rgba & !0xff) | (alpha as u32);
+        width = THIN_LINE;
+    }
     let flattened = flatten::flatten_path(bezpath, TOLERANCE);
     for subpath in &flattened {
         encoder.polyline(subpath, rgba, width);
