@@ -2,8 +2,13 @@
 
 use std::mem;
 use std::ptr::copy_nonoverlapping;
+use std::str::FromStr;
 
-use kurbo::{Circle, Line, Vec2, Rect, Shape};
+use kurbo::{BezPath, Circle, Line, Vec2, Rect, Shape};
+
+use roxmltree::Document;
+
+mod flatten;
 
 // Keep these in sync with PietShaderTypes.h
 
@@ -106,7 +111,7 @@ impl<'a> Encoder<'a> {
     // Probably the thing to do is write proc macros.
     pub unsafe fn write_struct<T>(&mut self, ix: usize, s: &T) {
         let len = mem::size_of::<T>();
-        println!("writing {} bytes at {}", len, ix);
+        //println!("writing {} bytes at {}", len, ix);
         copy_nonoverlapping(s as *const T as *const u8, self.buf[ix..ix + len].as_mut_ptr(), len);
     }
 
@@ -162,8 +167,9 @@ impl<'a> Encoder<'a> {
             start: vec2_to_f32s(line.p0),
             end: vec2_to_f32s(line.p1),
         };
+        let bbox = line.bounding_box().inflate(width as f64, width as f64);
         unsafe {
-            self.add_item(&piet_stroke_line, ShortBbox::from_rect(line.bounding_box()));
+            self.add_item(&piet_stroke_line, ShortBbox::from_rect(bbox));
         }
     }
 
@@ -230,9 +236,96 @@ fn make_path_test(encoder: &mut Encoder) {
     encoder.end_group();
 }
 
+
+fn make_tiger(encoder: &mut Encoder) {
+    let scale = 8.0;
+    let tiger_svg = include_bytes!("../Ghostscript_Tiger.svg");
+    let doc = Document::parse(std::str::from_utf8(tiger_svg).unwrap()).unwrap();
+    let root = doc.root_element();
+    let g = root.first_element_child().unwrap();
+    let mut n_items = 0;
+    for path in g.children() {
+        if path.is_element() {
+            let d = path.attribute("d").unwrap();
+            if let Ok(ref bp) = BezPath::from_svg(d) {
+                let xform_path = kurbo::Affine::scale(scale) * bp;
+                if path.attribute("fill").is_some() {
+                    n_items += count_fill_items(&xform_path);
+                }
+                if path.attribute("stroke").is_some() {
+                    n_items += count_stroke_items(&xform_path);
+                }                
+            }
+        }
+    }
+    println!("{} items", n_items);
+    encoder.begin_group(n_items);
+    for path in g.children() {
+        if path.is_element() {
+            let d = path.attribute("d").unwrap();
+            let bez_path = BezPath::from_svg(d);
+            if let Ok(ref bp) = bez_path {
+                let xform_path = kurbo::Affine::scale(scale) * bp;
+                if let Some(fill_color) = path.attribute("fill") {
+                    encode_path(encoder, &xform_path, parse_color(fill_color));
+                }
+                if let Some(stroke_color) = path.attribute("stroke") {
+                    let width = f32::from_str(path.attribute("stroke-width").unwrap()).unwrap();
+                    let width = width * (scale as f32);
+                    let color = parse_color(stroke_color);
+                    encode_path_stroke(encoder, &xform_path, width, color);
+                }
+            }
+        }
+    }
+    encoder.end_group();
+}
+
+const TOLERANCE: f64 = 0.1;
+
+fn count_fill_items(bezpath: &BezPath) -> usize {
+    let flattened = flatten::flatten_path(bezpath, TOLERANCE);
+    flattened.len()
+}
+
+fn count_stroke_items(bezpath: &BezPath) -> usize {
+    let flattened = flatten::flatten_path(bezpath, TOLERANCE);
+    flattened.iter().map(|subpath| subpath.len() - 1).sum()
+}
+
+fn encode_path(encoder: &mut Encoder, bezpath: &BezPath, rgba: u32) {
+    let flattened = flatten::flatten_path(bezpath, TOLERANCE);
+    for subpath in &flattened {
+        encoder.fill(subpath, rgba);
+    }
+}
+
+fn encode_path_stroke(encoder: &mut Encoder, bezpath: &BezPath, width: f32, rgba: u32) {
+    let flattened = flatten::flatten_path(bezpath, TOLERANCE);
+    for subpath in flattened {
+        for pts in subpath.windows(2) {
+            let line = Line::new(pts[0], pts[1]);
+            encoder.stroke_line(line, width, rgba);
+        }
+    }
+}
+
 fn make_test_scene(encoder: &mut Encoder) {
     //make_cardioid(encoder);
-    make_path_test(encoder);
+    //make_path_test(encoder);
+    make_tiger(encoder);
+}
+
+fn parse_color(color: &str) -> u32 {
+    if color.as_bytes()[0] == b'#' {
+        let mut hex = u32::from_str_radix(&color[1..], 16).unwrap();
+        if color.len() == 4 {
+            hex = (hex >> 8) * 0x110000 + ((hex >> 4) & 0xf) * 0x1100 + (hex & 0xf) * 0x11;
+        }
+        (hex << 8) + 0xff
+    } else {
+        0xff00ff80
+    }
 }
 
 #[no_mangle]
@@ -240,5 +333,5 @@ pub unsafe extern fn init_test_scene(scene_buf: *mut u8, buf_size: usize) {
     let buf_slice = std::slice::from_raw_parts_mut(scene_buf, buf_size);
     let mut encoder = Encoder::new(buf_slice);
     make_test_scene(&mut encoder);
-    encoder.debug_print();
+    //encoder.debug_print();
 }

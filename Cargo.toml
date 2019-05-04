@@ -9,9 +9,10 @@ keywords = ["graphics", "2d"]
 categories = ["rendering::graphics-api"]
 
 [dependencies]
-# Note: 0.2.1 has some bugs, we'll do a new release soon
-#kurbo = "0.2.1"
-kurbo = { git = "https://github.com/linebender/kurbo" }
+kurbo = "0.2.2"
+
+# this is for reading the tiger, will be factored out
+roxmltree = "0.6.0"
 
 [lib]
 name = "piet_metal"
