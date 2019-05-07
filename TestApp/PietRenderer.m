@@ -13,6 +13,7 @@
     id<MTLRenderPipelineState> _renderPipelineState;
     id<MTLCommandQueue> _commandQueue;
     id<MTLTexture> _texture;
+    id<MTLTexture> _loTexture;
     id<MTLBuffer> _sceneBuf;
     id<MTLBuffer> _tileBuf;
     vector_uint2 _viewportSize;
@@ -83,7 +84,7 @@
     // Run tile compute shader.
     id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
     [computeEncoder setComputePipelineState:_tilePipelineState];
-    [computeEncoder setTexture:_texture atIndex:0];
+    [computeEncoder setTexture:_loTexture atIndex:0];
     [computeEncoder setBuffer:_sceneBuf offset:0 atIndex:0];
     [computeEncoder setBuffer:_tileBuf offset:0 atIndex:1];
     MTLSize tilegroupSize = MTLSizeMake(tilerGroupWidth, tilerGroupHeight, 1);
@@ -110,6 +111,7 @@
                                length:sizeof(quadVertices)
                               atIndex:RenderVertexInputIndexVertices];
         [renderEncoder setFragmentTexture:_texture atIndex:0];
+        [renderEncoder setFragmentTexture:_loTexture atIndex:1];
         [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
         [renderEncoder endEncoding];
         [commandBuffer presentDrawable:view.currentDrawable];
@@ -129,7 +131,11 @@
     descriptor.height = _viewportSize.y;
     descriptor.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
     _texture = [_device newTextureWithDescriptor:descriptor];
-    
+
+    descriptor.width = (_viewportSize.x + tileWidth - 1) / tileWidth;
+    descriptor.height = (_viewportSize.y + tileHeight - 1) / tileHeight;
+    _loTexture = [_device newTextureWithDescriptor:descriptor];
+
     [self initScene];
 }
 

@@ -23,10 +23,18 @@ vertexShader(uint vertexID [[ vertex_id ]],
     return out;
 }
 
-fragment float4 fragmentShader(RenderData in [[stage_in]],
-                               texture2d<half> texture [[ texture(0) ]]) {
-    const half4 sample = texture.read(uint2(in.textureCoordinate));
-    return float4(sample);
+fragment half4 fragmentShader(RenderData in [[stage_in]],
+                               texture2d<half> texture [[texture(0)]],
+                               texture2d<half> loTexture [[texture(1)]]) {
+    uint2 coords = uint2(in.textureCoordinate);
+    uint2 tgid = uint2(coords.x / tileWidth, coords.y / tileHeight);
+    const half4 loSample = loTexture.read(tgid);
+    if (loSample.a == 0.0) {
+        const half4 sample = texture.read(coords);
+        return sample;
+    } else {
+        return loSample;
+    }
 }
 
 // Distance field rendering of strokes
@@ -101,6 +109,12 @@ struct CmdDrawFill {
     uint rgba;
 };
 
+struct CmdSolid {
+    ushort cmd;
+    ushort _padding;
+    uint rgba;
+};
+
 // Maybe these should be an enum.
 #define CMD_END 0
 #define CMD_CIRCLE 1
@@ -109,16 +123,21 @@ struct CmdDrawFill {
 #define CMD_FILL 4
 #define CMD_FILL_EDGE 5
 #define CMD_DRAW_FILL 6
+#define CMD_SOLID 7
+#define CMD_BAIL 86
 
 struct TileEncoder {
 public:
     TileEncoder(device char *dst) {
         this->dst = dst;
+        this->tileBegin = dst;
+        this->solidColor = 0xffffffff;
     }
     void encodeCircle(ushort4 bbox) {
         device CmdCircle *cmd = (device CmdCircle *)dst;
         cmd->cmd = CMD_CIRCLE;
         cmd->bbox = bbox;
+        solidColor = 0;
         dst += sizeof(CmdCircle);
     }
     void encodeLine(const device PietStrokeLine &line) {
@@ -133,6 +152,7 @@ public:
         cmd->cmd = CMD_STROKE;
         cmd->rgba = line.rgbaColor;
         cmd->halfWidth = 0.5 * line.width;
+        solidColor = 0;
         dst += sizeof(CmdStroke);
     }
     void encodeFill(float2 start, float2 end) {
@@ -154,21 +174,46 @@ public:
         cmd->cmd = CMD_DRAW_FILL;
         cmd->backdrop = backdrop;
         cmd->rgba = fill.rgbaColor;
+        solidColor = 0;
         dst += sizeof(CmdDrawFill);
     }
-    void end() {
-        device CmdEnd *cmd = (device CmdEnd *)dst;
-        cmd->cmd = CMD_END;
+    void encodeSolid(uint rgba) {
+        // A fun optimization would be to alpha-composite semi-opaque
+        // solid blocks.
+        
+        // Another optimization is to skip encoding the default bg color.
+        if ((rgba & 0xff000000) == 0xff000000) {
+            solidColor = rgba;
+            dst = tileBegin;
+        }
+        device CmdSolid *cmd = (device CmdSolid *)dst;
+        // Note: could defer writing, not sure how much of a win that is
+        cmd->cmd = CMD_SOLID;
+        cmd->rgba = rgba;
+        dst += sizeof(CmdSolid);
+    }
+    // return solid color
+    uint end() {
+        if (solidColor) {
+            *(device ushort *)tileBegin = CMD_BAIL;
+        } else {
+            device CmdEnd *cmd = (device CmdEnd *)dst;
+            cmd->cmd = CMD_END;
+        }
+        return solidColor;
     }
 private:
     // Pointer to command buffer for tile.
     device char *dst;
+    device char *tileBegin;
+    uint solidColor;
 };
 
 // Traverse the scene graph and produce a command list for a tile.
 kernel void
 tileKernel(device const char *scene [[buffer(0)]],
            device char *tiles [[buffer(1)]],
+           texture2d<half, access::write> outTexture [[texture(0)]],
            uint2 gid [[thread_position_in_grid]],
            uint tix [[thread_index_in_simdgroup]],
            uint sgSize [[threads_per_simdgroup]])
@@ -336,8 +381,10 @@ tileKernel(device const char *scene [[buffer(0)]],
                             fillVote &= ~(1 << fillSubIx);
                         }
                     }
-                    if (anyFill || backdrop != 0.0) {
+                    if (anyFill) {
                         encoder.encodeDrawFill(fill, backdrop);
+                    } else if (backdrop != 0.0) {
+                        encoder.encodeSolid(fill.rgbaColor);
                     }
                     break;
                 }
@@ -345,7 +392,8 @@ tileKernel(device const char *scene [[buffer(0)]],
             v &= ~(1 << k);  // aka v &= (v - 1)
         }
     }
-    encoder.end();
+    uint solidColor = encoder.end();
+    outTexture.write(unpack_unorm4x8_to_half(solidColor), gid);
 }
 
 // Interpret the commands in the command list to produce a pixel.
@@ -440,6 +488,15 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 signedArea = 0.0;
                 break;
             }
+            case CMD_SOLID: {
+                const device CmdSolid *solid = (const device CmdSolid *)src;
+                src += sizeof(CmdSolid);
+                half4 fg = unpack_unorm4x8_srgb_to_half(solid->rgba);
+                rgb = mix(rgb, fg.rgb, fg.a);
+                break;
+            }
+            case CMD_BAIL:
+                return;
         }
     }
     // Linear to sRGB conversion. Note that if we had writable sRGB textures
