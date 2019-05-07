@@ -190,26 +190,29 @@ tileKernel(device const char *scene [[buffer(0)]],
     uint n = group->nItems;
     device const PietItem *items = (device const PietItem *)(scene + group->itemsIx);
     for (uint i = 0; i < n; i += sgSize) {
-        bool hit = false;
+        bool hitCoarse = false;
         if (i + tix < n) {
             ushort4 bbox = bboxes[i + tix];
-            hit = bbox.z >= sx0 && bbox.x < sx0 + stw && bbox.w >= sy0 && bbox.y < sy0 + sth;
+            hitCoarse = bbox.z >= sx0 && bbox.x < sx0 + stw && bbox.w >= sy0 && bbox.y < sy0 + sth;
         }
-        simd_vote vote = simd_ballot(hit);
+        simd_vote vote = simd_ballot(hitCoarse);
         uint v = simd_vote::vote_t(vote);
         while (v) {
             uint k = ctz(v);
             // To explore: use simd_broadcast rather then second global memory read.
             uint ix = i + k;
             ushort4 bbox = bboxes[ix];
-            if (bbox.z >= x0 && bbox.x < x0 + tileWidth && bbox.w >= y0 && bbox.y < y0 + tileHeight) {
-                ushort itemType = items[ix].itemType;
-                switch (itemType) {
-                    case PIET_ITEM_CIRCLE:
+            bool hit = bbox.z >= x0 && bbox.x < x0 + tileWidth && bbox.w >= y0 && bbox.y < y0 + tileHeight;
+            ushort itemType = items[ix].itemType;
+            switch (itemType) {
+                case PIET_ITEM_CIRCLE:
+                    if (hit) {
                         encoder.encodeCircle(bbox);
-                        break;
-                    case PIET_ITEM_LINE: {
-                        // set up line equation, ax + by + c = 0
+                    }
+                    break;
+                case PIET_ITEM_LINE: {
+                    // set up line equation, ax + by + c = 0
+                    if (hit) {
                         device const PietStrokeLine &line = items[ix].line;
                         float a = line.end.y - line.start.y;
                         float b = line.start.x - line.end.x;
@@ -229,29 +232,74 @@ tileKernel(device const char *scene [[buffer(0)]],
                             encoder.encodeLine(line);
                             encoder.encodeStroke(line);
                         }
-                        break;
                     }
-                    case PIET_ITEM_FILL: {
-                        device const PietFill &fill = items[ix].fill;
-                        device const float2 *pts = (device const float2 *)(scene + fill.pointsIx);
-                        uint nPoints = fill.nPoints;
-                        float backdrop = 0;
-                        bool anyFill = false;
-                        // TODO: use simd ballot to quick-reject segments with no contribution
-                        for (uint j = 0; j < nPoints; j++) {
-                            float2 start = pts[j];
-                            float2 end = pts[j + 1 == nPoints ? 0 : j + 1];
-                            float ymin = min(start.y, end.y);
-                            float ymax = max(start.y, end.y);
-                            if (ymax >= y0 && ymin < y0 + tileHeight) {
+                    break;
+                }
+                case PIET_ITEM_FILL: {
+                    device const PietFill &fill = items[ix].fill;
+                    device const float2 *pts = (device const float2 *)(scene + fill.pointsIx);
+                    uint nPoints = fill.nPoints;
+                    float backdrop = 0;
+                    bool anyFill = false;
+                    // use simd ballot to quick-reject segments with no contribution
+                    // Note: we just do 16 at a time for now, there's the option of doing
+                    // a 16x2 strip of tiles, with more complexity in the left-ray test.
+                    for (uint j = 0; j < nPoints; j += 16) {
+                        bool fillHit = false;
+                        uint fillIx = j + tix;
+                        if (fillIx < nPoints) {
+                            float2 start = pts[fillIx];
+                            float2 end = pts[fillIx + 1 == nPoints ? 0 : fillIx + 1];
+                            float2 xymin = min(start, end);
+                            float2 xymax = max(start, end);
+                            if (xymax.y >= y0 && xymin.y < y0 + tileHeight && xymin.x < sx0 + stw) {
+                                // set up line equation, ax + by + c = 0
+                                float a = end.y - start.y;
+                                float b = start.x - end.x;
+                                float c = -(a * start.x + b * start.y);
+                                float left = a * sx0;
+                                float right = a * (sx0 + stw);
+                                float ytop = max(float(y0), xymin.y);
+                                float ybot = min(float(y0 + tileHeight), xymax.y);
+                                float top = b * ytop;
+                                float bot = b * ybot;
+                                // top left of rightmost tile in strip
+                                float sTopLeft = sign(right - a * (tileWidth) + float(y0) * b + c);
+                                float s00 = sign(top + left + c);
+                                float s01 = sign(top + right + c);
+                                float s10 = sign(bot + left + c);
+                                float s11 = sign(bot + right + c);
+                                if (sTopLeft == sign(a) && xymin.y <= y0) {
+                                    // left ray intersects, need backdrop
+                                    fillHit = true;
+                                }
+                                if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0 && xymax.x > sx0) {
+                                    // intersects strip
+                                    fillHit = true;
+                                }
+                            }
+                        }
+                        uint fillVote = simd_vote::vote_t(simd_ballot(fillHit));
+                        while (fillVote) {
+                            uint fillSubIx = ctz(fillVote);
+                            fillIx = j + fillSubIx;
+
+                            if (hit) {
+                                float2 start = pts[fillIx];
+                                float2 end = pts[fillIx + 1 == nPoints ? 0 : fillIx + 1];
+                                float2 xymin = min(start, end);
+                                float2 xymax = max(start, end);
+                                // Note: no y-based cull here because it's been done in the earlier pass.
+                                // If we change that to do a strip taller than 1 tile, re-introduce here.
+
                                 // set up line equation, ax + by + c = 0
                                 float a = end.y - start.y;
                                 float b = start.x - end.x;
                                 float c = -(a * start.x + b * start.y);
                                 float left = a * x0;
                                 float right = a * (x0 + tileWidth);
-                                float ytop = max(float(y0), ymin);
-                                float ybot = min(float(y0 + tileHeight), ymax);
+                                float ytop = max(float(y0), xymin.y);
+                                float ybot = min(float(y0 + tileHeight), xymax.y);
                                 float top = b * ytop;
                                 float bot = b * ybot;
                                 // top left of tile
@@ -260,10 +308,10 @@ tileKernel(device const char *scene [[buffer(0)]],
                                 float s01 = sign(top + right + c);
                                 float s10 = sign(bot + left + c);
                                 float s11 = sign(bot + right + c);
-                                if (sTopLeft == sign(a) && ymin <= y0) {
+                                if (sTopLeft == sign(a) && xymin.y <= y0) {
                                     backdrop -= s00;
                                 }
-                                if (min(start.x, end.x) < x0 && max(start.x, end.x) > x0) {
+                                if (xymin.x < x0 && xymax.x > x0) {
                                     float yEdge = mix(start.y, end.y, (start.x - x0) / b);
                                     if (yEdge >= y0 && yEdge < y0 + tileHeight) {
                                         // line intersects left edge of this tile
@@ -278,17 +326,20 @@ tileKernel(device const char *scene [[buffer(0)]],
                                         encoder.encodeFill(start, end);
                                         anyFill = true;
                                     }
-                                } else if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
+                                } else if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0
+                                           && xymin.x < x0 + tileWidth && xymax.x > x0) {
                                     encoder.encodeFill(start, end);
                                     anyFill = true;
                                 }
-                            }
+                            } // end if (hit)
+
+                            fillVote &= ~(1 << fillSubIx);
                         }
-                        if (anyFill || backdrop != 0.0) {
-                            encoder.encodeDrawFill(fill, backdrop);
-                        }
-                        break;
                     }
+                    if (anyFill || backdrop != 0.0) {
+                        encoder.encodeDrawFill(fill, backdrop);
+                    }
+                    break;
                 }
             }
             v &= ~(1 << k);  // aka v &= (v - 1)
