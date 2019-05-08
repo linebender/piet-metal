@@ -8,6 +8,7 @@ using namespace metal;
 struct RenderData {
     float4 clipSpacePosition [[position]];
     float2 textureCoordinate;
+    float pointSize [[point_size]];
 };
 
 vertex RenderData
@@ -20,13 +21,14 @@ vertexShader(uint vertexID [[ vertex_id ]],
     out.clipSpacePosition.z = 0.0;
     out.clipSpacePosition.w = 1.0;
     out.textureCoordinate = vertexArray[vertexID].textureCoordinate;
+    out.pointSize = 16;
     return out;
 }
 
 fragment half4 fragmentShader(RenderData in [[stage_in]],
                                texture2d<half> texture [[texture(0)]],
                                texture2d<half> loTexture [[texture(1)]]) {
-    uint2 coords = uint2(in.textureCoordinate);
+    uint2 coords = uint2(in.clipSpacePosition.xy);
     uint2 tgid = uint2(coords.x / tileWidth, coords.y / tileHeight);
     const half4 loSample = loTexture.read(tgid);
     if (loSample.a == 0.0) {

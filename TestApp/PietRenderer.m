@@ -57,22 +57,6 @@
 }
 
 - (void)drawInMTKView:(nonnull MTKView *)view {
-    RenderVertex quadVertices[] = {
-        //Viewport Positions, Texture Coordinates
-        { {  1,  -1 }, { 1.f, 1.f } },
-        { { -1,  -1 }, { 0.f, 1.f } },
-        { { -1,   1 }, { 0.f, 0.f } },
-        
-        { {  1,  -1 }, { 1.f, 1.f } },
-        { { -1,   1 }, { 0.f, 0.f } },
-        { {  1,   1 }, { 1.f, 0.f } },
-    };
-    quadVertices[0].textureCoordinate.x = _viewportSize.x;
-    quadVertices[0].textureCoordinate.y = _viewportSize.y;
-    quadVertices[1].textureCoordinate.y = _viewportSize.y;
-    quadVertices[3].textureCoordinate.x = _viewportSize.x;
-    quadVertices[3].textureCoordinate.y = _viewportSize.y;
-    quadVertices[5].textureCoordinate.x = _viewportSize.x;
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     commandBuffer.label = @"RenderCommand";
 
@@ -111,7 +95,7 @@
         [renderEncoder setVertexBuffer:_vertexBuf offset:0 atIndex:RenderVertexInputIndexVertices];
         [renderEncoder setFragmentTexture:_texture atIndex:0];
         [renderEncoder setFragmentTexture:_loTexture atIndex:1];
-        [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6 * nTilesX * nTilesY];
+        [renderEncoder drawPrimitives:MTLPrimitiveTypePoint vertexStart:0 vertexCount:nTilesX * nTilesY];
         [renderEncoder endEncoding];
         [commandBuffer presentDrawable:view.currentDrawable];
     }
@@ -138,28 +122,23 @@
     descriptor.height = nTilesY;
     _loTexture = [_device newTextureWithDescriptor:descriptor];
     
-    uint vertexLen = nTilesX * nTilesY * 6 * sizeof(RenderVertex);
+    uint vertexLen = nTilesX * nTilesY * sizeof(RenderVertex);
     MTLResourceOptions vertexOptions = MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined;
     _vertexBuf = [_device newBufferWithLength:vertexLen options:vertexOptions];
     RenderVertex *vertices = (RenderVertex *)_vertexBuf.contents;
     uint ix = 0;
-    const int uv[6][2] = {{1, 1}, {0, 1}, {0, 0}, {1, 1}, {0, 0}, {1, 0}};
     float scaleX = 2.0 / _viewportSize.x;
     float scaleY = 2.0 / _viewportSize.y;
     for (uint y = 0; y < nTilesY; y++) {
         for (uint x = 0; x < nTilesX; x++) {
-            for (uint i = 0; i < 6; i++) {
-                RenderVertex rv;
-                uint x0 = x * tileWidth;
-                uint y0 = y * tileHeight;
-                uint x1 = MIN(_viewportSize.x, x0 + tileWidth);
-                uint y1 = MIN(_viewportSize.y, y0 + tileHeight);
-                rv.position.x = (x0 + uv[i][0] * (x1 - x0)) * scaleX - 1.0;
-                rv.position.y = (y0 + uv[i][1] * (y1 - y0)) * -scaleY + 1.0;
-                rv.textureCoordinate.x = x0 + uv[i][0] * (x1 - x0);
-                rv.textureCoordinate.y = y0 + uv[i][1] * (y1 - y0);
-                vertices[ix++] = rv;
-            }
+            RenderVertex rv;
+            uint x0 = x * tileWidth + (tileWidth / 2);
+            uint y0 = y * tileHeight + (tileHeight / 2);
+            rv.position.x = x0 * scaleX - 1.0;
+            rv.position.y = y0 * -scaleY + 1.0;
+            rv.textureCoordinate.x = x0;
+            rv.textureCoordinate.y = y0;
+            vertices[ix++] = rv;
         }
     }
 
