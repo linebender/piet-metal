@@ -72,6 +72,7 @@ struct CmdEnd {
 // real use.
 struct CmdCircle {
     ushort cmd;
+    ushort _padding;
     packed_ushort4 bbox;
 };
 
@@ -420,10 +421,16 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
     half signedArea = 0.0;
 
     ushort cmd;
-    while ((cmd = *(const device ushort *)src) != CMD_END) {
+    while (1) {
+        // Note: this has to be the biggest struct (could use a union for this)
+        CmdFill cmdBuf = *(const device CmdFill *)src;
+        cmd = cmdBuf.cmd;
+        if (cmd == CMD_END) {
+            break;
+        }
         switch (cmd) {
             case CMD_CIRCLE: {
-                const device CmdCircle *circle = (const device CmdCircle *)src;
+                const thread CmdCircle *circle = (const thread CmdCircle *)&cmdBuf;
                 src += sizeof(CmdCircle);
                 ushort4 bbox = circle->bbox;
                 float2 xy0 = float2(bbox.x, bbox.y);
@@ -438,13 +445,13 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 break;
             }
             case CMD_LINE: {
-                const device CmdLine *line = (const device CmdLine *)src;
+                const thread CmdLine *line = (const thread CmdLine *)&cmdBuf;
                 src += sizeof(CmdLine);
                 stroke(df, xy, line->start, line->end);
                 break;
             }
             case CMD_STROKE: {
-                const device CmdStroke *stroke = (const device CmdStroke *)src;
+                const thread CmdStroke *stroke = (const thread CmdStroke *)&cmdBuf;
                 src += sizeof(CmdStroke);
                 half alpha = renderDf(df, stroke->halfWidth);
                 half4 fg = unpack_unorm4x8_srgb_to_half(stroke->rgba);
@@ -453,7 +460,7 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 break;
             }
             case CMD_FILL: {
-                const device CmdFill *fill = (const device CmdFill *)src;
+                const thread CmdFill *fill = (const thread CmdFill *)&cmdBuf;
                 src += sizeof(CmdFill);
                 float2 start = fill->start - xy;
                 float2 end = fill->end - xy;
@@ -476,13 +483,13 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 break;
             }
             case CMD_FILL_EDGE: {
-                const device CmdFillEdge *fill = (const device CmdFillEdge *)src;
+                const thread CmdFillEdge *fill = (const thread CmdFillEdge *)&cmdBuf;
                 src += sizeof(CmdFillEdge);
                 signedArea += fill->sign * saturate(y - fill->y + 1);
                 break;
             }
             case CMD_DRAW_FILL: {
-                const device CmdDrawFill *draw = (const device CmdDrawFill *)src;
+                const thread CmdDrawFill *draw = (const thread CmdDrawFill *)&cmdBuf;
                 src += sizeof(CmdDrawFill);
                 half alpha = signedArea + half(draw->backdrop);
                 alpha = min(abs(alpha), 1.0h); // nonzero winding rule
@@ -494,7 +501,7 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 break;
             }
             case CMD_SOLID: {
-                const device CmdSolid *solid = (const device CmdSolid *)src;
+                const thread CmdSolid *solid = (const thread CmdSolid *)&cmdBuf;
                 src += sizeof(CmdSolid);
                 half4 fg = unpack_unorm4x8_srgb_to_half(solid->rgba);
                 rgb = mix(rgb, fg.rgb, fg.a);
