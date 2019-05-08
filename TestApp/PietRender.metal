@@ -9,29 +9,32 @@ struct RenderData {
     float4 clipSpacePosition [[position]];
     float2 textureCoordinate;
     float pointSize [[point_size]];
+    half4 solidColor;
 };
 
 vertex RenderData
 vertexShader(uint vertexID [[ vertex_id ]],
-             constant RenderVertex *vertexArray [[ buffer(RenderVertexInputIndexVertices) ]])
+             constant RenderVertex *vertexArray [[ buffer(RenderVertexInputIndexVertices) ]],
+             texture2d<half> loTexture [[texture(0)]])
 {
     RenderData out;
     float2 clipSpacePosition = vertexArray[vertexID].position;
     out.clipSpacePosition.xy = clipSpacePosition;
     out.clipSpacePosition.z = 0.0;
     out.clipSpacePosition.w = 1.0;
-    out.textureCoordinate = vertexArray[vertexID].textureCoordinate;
+    float2 xy = vertexArray[vertexID].textureCoordinate;
+    out.textureCoordinate = xy;
     out.pointSize = 16;
+    uint2 tileXY = uint2(xy.x / tileWidth, xy.y / tileHeight);
+    out.solidColor = loTexture.read(tileXY);
     return out;
 }
 
 fragment half4 fragmentShader(RenderData in [[stage_in]],
-                               texture2d<half> texture [[texture(0)]],
-                               texture2d<half> loTexture [[texture(1)]]) {
-    uint2 coords = uint2(in.clipSpacePosition.xy);
-    uint2 tgid = uint2(coords.x / tileWidth, coords.y / tileHeight);
-    const half4 loSample = loTexture.read(tgid);
+                               texture2d<half> texture [[texture(0)]]) {
+    const half4 loSample = in.solidColor;
     if (loSample.a == 0.0) {
+        uint2 coords = uint2(in.clipSpacePosition.xy);
         const half4 sample = texture.read(coords);
         return sample;
     } else {

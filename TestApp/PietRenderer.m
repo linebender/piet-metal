@@ -93,8 +93,8 @@
         [renderEncoder setViewport:(MTLViewport){0.0, 0.0, _viewportSize.x, _viewportSize.y, -1.0, 1.0}];
         [renderEncoder setRenderPipelineState:_renderPipelineState];
         [renderEncoder setVertexBuffer:_vertexBuf offset:0 atIndex:RenderVertexInputIndexVertices];
+        [renderEncoder setVertexTexture:_loTexture atIndex:0];
         [renderEncoder setFragmentTexture:_texture atIndex:0];
-        [renderEncoder setFragmentTexture:_loTexture atIndex:1];
         [renderEncoder drawPrimitives:MTLPrimitiveTypePoint vertexStart:0 vertexCount:nTilesX * nTilesY];
         [renderEncoder endEncoding];
         [commandBuffer presentDrawable:view.currentDrawable];
