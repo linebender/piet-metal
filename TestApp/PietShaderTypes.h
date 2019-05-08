@@ -24,7 +24,7 @@ typedef enum RenderVertexInputIndex
 // The number of bytes in a buffer for a single tile.
 // For prototyping, this is a hard maximum, but for production we'd want
 // a mechanism to overflow.
-#define tileBufSize 4096
+#define tileBufSize 16384
 
 // For simplicity, we're going to hardcode these dimensions. For production,
 // they need to be dynamic.
@@ -60,14 +60,24 @@ typedef struct PietFill {
     uint pointsIx;
 } PietFill;
 
+typedef struct PietStrokePolyLine {
+    uint itemType;
+    uint rgbaColor;
+    float width;
+    uint nPoints;
+    uint pointsIx;
+} PietStrokePolyLine;
+
 typedef union PietItem {
     uint itemType;
     PietCircle circle;
     PietStrokeLine line;
     PietFill fill;
+    PietStrokePolyLine poly;
 } PietItem;
 
 // This should be an enum but the storage needs to be of fixed size
 #define PIET_ITEM_CIRCLE 1
 #define PIET_ITEM_LINE 2
 #define PIET_ITEM_FILL 3
+#define PIET_ITEM_STROKE_POLYLINE 4

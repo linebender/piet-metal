@@ -57,12 +57,23 @@ struct PietFill {
     points_ix: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PietStrokePolyLine {
+    item_type: ItemType,
+    rgba: u32,
+    width: f32,
+    n_points: u32,
+    points_ix: u32,
+}
+
 #[repr(u32)]
 #[derive(Clone, Copy)]
 enum ItemType {
     Circle = 1,
     Line = 2,
     Fill = 3,
+    StrokePolyLine = 4,
 }
 
 pub struct Encoder<'a> {
@@ -167,7 +178,9 @@ impl<'a> Encoder<'a> {
             start: vec2_to_f32s(line.p0),
             end: vec2_to_f32s(line.p1),
         };
-        let bbox = line.bounding_box().inflate(width as f64, width as f64);
+        // TODO: do we need to add an additional 0.5?
+        let hw = (width * 0.5) as f64;
+        let bbox = line.bounding_box().inflate(hw, hw);
         unsafe {
             self.add_item(&piet_stroke_line, ShortBbox::from_rect(bbox));
         }
@@ -175,7 +188,7 @@ impl<'a> Encoder<'a> {
 
     // Signature will change, need to deal with subpaths and also want curves.
     pub fn fill(&mut self, points: &[Vec2], rgba: u32) {
-        let mut points_ix = self.alloc(points.len() * mem::size_of::<(f32, f32)>());
+        let (points_ix, bbox) = self.encode_points(points);
         let piet_fill = PietFill {
             item_type: ItemType::Fill,
             flags: Default::default(),
@@ -183,6 +196,29 @@ impl<'a> Encoder<'a> {
             n_points: points.len() as u32,
             points_ix: points_ix as u32,
         };
+        unsafe {
+            self.add_item(&piet_fill, ShortBbox::from_rect(bbox));
+        }
+    }
+
+    pub fn polyline(&mut self, points: &[Vec2], rgba: u32, width: f32) {
+        let (points_ix, bbox) = self.encode_points(points);
+        let piet_poly = PietStrokePolyLine {
+            item_type: ItemType::StrokePolyLine,
+            rgba: rgba.to_be(),
+            width,
+            n_points: points.len() as u32,
+            points_ix: points_ix as u32,
+        };
+        let hw = (width * 0.5) as f64;
+        unsafe {
+            self.add_item(&piet_poly, ShortBbox::from_rect(bbox.inflate(hw, hw)));
+        }
+    }
+
+    pub fn encode_points(&mut self, points: &[Vec2]) -> (usize, Rect) {
+        let points_ix = self.alloc(points.len() * mem::size_of::<(f32, f32)>());
+        let mut dst = points_ix;
         let mut bbox = None;
         for &pt in points {
             bbox = match bbox {
@@ -190,17 +226,12 @@ impl<'a> Encoder<'a> {
                 Some(old_bbox) => Some(old_bbox.union_pt(pt)),
             };
             unsafe {
-                self.write_struct(points_ix, &vec2_to_f32s(pt));
-                points_ix += mem::size_of::<(f32, f32)>();
+                self.write_struct(dst, &vec2_to_f32s(pt));
+                dst += mem::size_of::<(f32, f32)>();
             }
         }
-        if let Some(bbox) = bbox {
-            unsafe {
-                self.add_item(&piet_fill, ShortBbox::from_rect(bbox));
-            }
-        } else {
-            panic!("fill with 0 points");
-        }
+        let bbox = bbox.expect("encoded empty points vector");
+        (points_ix, bbox)
     }
 
     #[allow(unused)]
@@ -290,7 +321,7 @@ fn count_fill_items(bezpath: &BezPath) -> usize {
 
 fn count_stroke_items(bezpath: &BezPath) -> usize {
     let flattened = flatten::flatten_path(bezpath, TOLERANCE);
-    flattened.iter().map(|subpath| subpath.len() - 1).sum()
+    flattened.len()
 }
 
 fn encode_path(encoder: &mut Encoder, bezpath: &BezPath, rgba: u32) {
@@ -302,11 +333,8 @@ fn encode_path(encoder: &mut Encoder, bezpath: &BezPath, rgba: u32) {
 
 fn encode_path_stroke(encoder: &mut Encoder, bezpath: &BezPath, width: f32, rgba: u32) {
     let flattened = flatten::flatten_path(bezpath, TOLERANCE);
-    for subpath in flattened {
-        for pts in subpath.windows(2) {
-            let line = Line::new(pts[0], pts[1]);
-            encoder.stroke_line(line, width, rgba);
-        }
+    for subpath in &flattened {
+        encoder.polyline(subpath, rgba, width);
     }
 }
 
