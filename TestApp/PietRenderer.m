@@ -16,6 +16,7 @@
     id<MTLTexture> _loTexture;
     id<MTLBuffer> _sceneBuf;
     id<MTLBuffer> _tileBuf;
+    id<MTLBuffer> _vertexBuf;
     vector_uint2 _viewportSize;
 }
 
@@ -107,12 +108,10 @@
         id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
         [renderEncoder setViewport:(MTLViewport){0.0, 0.0, _viewportSize.x, _viewportSize.y, -1.0, 1.0}];
         [renderEncoder setRenderPipelineState:_renderPipelineState];
-        [renderEncoder setVertexBytes:quadVertices
-                               length:sizeof(quadVertices)
-                              atIndex:RenderVertexInputIndexVertices];
+        [renderEncoder setVertexBuffer:_vertexBuf offset:0 atIndex:RenderVertexInputIndexVertices];
         [renderEncoder setFragmentTexture:_texture atIndex:0];
         [renderEncoder setFragmentTexture:_loTexture atIndex:1];
-        [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
+        [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6 * nTilesX * nTilesY];
         [renderEncoder endEncoding];
         [commandBuffer presentDrawable:view.currentDrawable];
     }
@@ -132,9 +131,37 @@
     descriptor.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
     _texture = [_device newTextureWithDescriptor:descriptor];
 
-    descriptor.width = (_viewportSize.x + tileWidth - 1) / tileWidth;
-    descriptor.height = (_viewportSize.y + tileHeight - 1) / tileHeight;
+    uint nTilesX = (_viewportSize.x + tileWidth - 1) / tileWidth;
+    uint nTilesY = (_viewportSize.y + tileHeight - 1) / tileHeight;
+
+    descriptor.width = nTilesX;
+    descriptor.height = nTilesY;
     _loTexture = [_device newTextureWithDescriptor:descriptor];
+    
+    uint vertexLen = nTilesX * nTilesY * 6 * sizeof(RenderVertex);
+    MTLResourceOptions vertexOptions = MTLResourceStorageModeShared | MTLResourceCPUCacheModeWriteCombined;
+    _vertexBuf = [_device newBufferWithLength:vertexLen options:vertexOptions];
+    RenderVertex *vertices = (RenderVertex *)_vertexBuf.contents;
+    uint ix = 0;
+    const int uv[6][2] = {{1, 1}, {0, 1}, {0, 0}, {1, 1}, {0, 0}, {1, 0}};
+    float scaleX = 2.0 / _viewportSize.x;
+    float scaleY = 2.0 / _viewportSize.y;
+    for (uint y = 0; y < nTilesY; y++) {
+        for (uint x = 0; x < nTilesX; x++) {
+            for (uint i = 0; i < 6; i++) {
+                RenderVertex rv;
+                uint x0 = x * tileWidth;
+                uint y0 = y * tileHeight;
+                uint x1 = MIN(_viewportSize.x, x0 + tileWidth);
+                uint y1 = MIN(_viewportSize.y, y0 + tileHeight);
+                rv.position.x = (x0 + uv[i][0] * (x1 - x0)) * scaleX - 1.0;
+                rv.position.y = (y0 + uv[i][1] * (y1 - y0)) * -scaleY + 1.0;
+                rv.textureCoordinate.x = x0 + uv[i][0] * (x1 - x0);
+                rv.textureCoordinate.y = y0 + uv[i][1] * (y1 - y0);
+                vertices[ix++] = rv;
+            }
+        }
+    }
 
     [self initScene];
 }
