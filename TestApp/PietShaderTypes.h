@@ -19,7 +19,7 @@ typedef enum RenderVertexInputIndex
 
 // Size (in tiles) of a threadgroup for tiling
 #define tilerGroupWidth 16
-#define tilerGroupHeight 16
+#define tilerGroupHeight 2
 
 // The number of bytes in a buffer for a single tile.
 // For prototyping, this is a hard maximum, but for production we'd want

@@ -221,18 +221,23 @@ tileKernel(device const char *scene [[buffer(0)]],
            device char *tiles [[buffer(1)]],
            texture2d<half, access::write> outTexture [[texture(0)]],
            uint2 gid [[thread_position_in_grid]],
-           uint tix [[thread_index_in_simdgroup]],
-           uint sgSize [[threads_per_simdgroup]])
+           uint tix [[thread_index_in_threadgroup]])
 {
     uint tileIx = gid.y * maxTilesWidth + gid.x;
     ushort x0 = gid.x * tileWidth;
     ushort y0 = gid.y * tileHeight;
     device char *dst = tiles + tileIx * tileBufSize;
     TileEncoder encoder(dst);
-    
+    // TODO: correct calculation of size
+    const ushort tgs = tilerGroupWidth * tilerGroupHeight;
+    const ushort nBitmap = tgs / 32;
+    threadgroup atomic_uint bitmap;
+    threadgroup uint rd;
+    const memory_order relaxed = memory_order::memory_order_relaxed;
+
     // Size of the region covered by one SIMD group. TODO, don't hardcode.
-    const ushort stw = 16 * tileWidth;
-    const ushort sth = (sgSize / 16) * tileHeight;
+    const ushort stw = tilerGroupWidth * tileWidth;
+    const ushort sth = tilerGroupHeight * tileHeight;
     ushort sx0 = x0 & ~(stw - 1);
     ushort sy0 = y0 & ~(sth - 1);
     
@@ -240,238 +245,265 @@ tileKernel(device const char *scene [[buffer(0)]],
     device const ushort4 *bboxes = (device const ushort4 *)&group->bbox[0];
     uint n = group->nItems;
     device const PietItem *items = (device const PietItem *)(scene + group->itemsIx);
-    for (uint i = 0; i < n; i += sgSize) {
-        bool hitCoarse = false;
+    for (uint i = 0; i < n; i += tgs) {
+        if (tix < nBitmap) {
+            atomic_store_explicit(&bitmap, 0, relaxed);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
         if (i + tix < n) {
             ushort4 bbox = bboxes[i + tix];
-            hitCoarse = bbox.z >= sx0 && bbox.x < sx0 + stw && bbox.w >= sy0 && bbox.y < sy0 + sth;
+            if (bbox.z >= sx0 && bbox.x < sx0 + stw && bbox.w >= sy0 && bbox.y < sy0 + sth) {
+                uint mask = 1 << (tix & 31);
+                atomic_fetch_or_explicit(&bitmap, mask, relaxed);
+            }
         }
-        simd_vote vote = simd_ballot(hitCoarse);
-        uint v = simd_vote::vote_t(vote);
-        while (v) {
-            uint k = ctz(v);
-            // To explore: use simd_broadcast rather then second global memory read.
-            uint ix = i + k;
-            ushort4 bbox = bboxes[ix];
-            bool hit = bbox.z >= x0 && bbox.x < x0 + tileWidth && bbox.w >= y0 && bbox.y < y0 + tileHeight;
-            ushort itemType = items[ix].itemType;
-            switch (itemType) {
-                case PIET_ITEM_CIRCLE:
-                    if (hit) {
-                        encoder.encodeCircle(bbox);
-                    }
-                    break;
-                case PIET_ITEM_LINE: {
-                    // set up line equation, ax + by + c = 0
-                    if (hit) {
-                        device const PietStrokeLine &line = items[ix].line;
-                        float a = line.end.y - line.start.y;
-                        float b = line.start.x - line.end.x;
-                        float c = -(a * line.start.x + b * line.start.y);
-                        // TODO: is this bound as tight as it can be?
-                        float hw = 0.5 * line.width + 0.5;
-                        float left = a * (x0 - hw);
-                        float right = a * (x0 + tileWidth + hw);
-                        float top = b * (y0 - hw);
-                        float bot = b * (y0 + tileHeight + hw);
-                        // If all four corners are on same side of line, cull
-                        float s00 = sign(top + left + c);
-                        float s01 = sign(top + right + c);
-                        float s10 = sign(bot + left + c);
-                        float s11 = sign(bot + right + c);
-                        if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
-                            encoder.encodeLine(line.start, line.end);
-                            encoder.encodeStroke(line.rgbaColor, line.width);
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        if (tix == 0) {
+            rd = atomic_load_explicit(&bitmap, relaxed);
+            atomic_store_explicit(&bitmap, 0, relaxed);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        //for (ushort bitmapIx = 0; bitmapIx <= bitmapCount; bitmapIx++) {
+            uint v = rd;
+            while (v) {
+                uint ix = i + ctz(v);
+                ushort4 bbox = bboxes[ix];
+                bool hit = bbox.z >= x0 && bbox.x < x0 + tileWidth && bbox.w >= y0 && bbox.y < y0 + tileHeight;
+                ushort itemType = items[ix].itemType;
+                switch (itemType) {
+                    case PIET_ITEM_CIRCLE:
+                        if (hit) {
+                            encoder.encodeCircle(bbox);
                         }
-                    }
-                    break;
-                }
-                case PIET_ITEM_FILL: {
-                    device const PietFill &fill = items[ix].fill;
-                    device const float2 *pts = (device const float2 *)(scene + fill.pointsIx);
-                    uint nPoints = fill.nPoints;
-                    float backdrop = 0;
-                    bool anyFill = false;
-                    // use simd ballot to quick-reject segments with no contribution
-                    // Note: we just do 16 at a time for now, there's the option of doing
-                    // a 16x2 strip of tiles, with more complexity in the left-ray test.
-                    for (uint j = 0; j < nPoints; j += 16) {
-                        bool fillHit = false;
-                        uint fillIx = j + tix;
-                        if (fillIx < nPoints && tix < 16) {
-                            float2 start = pts[fillIx];
-                            float2 end = pts[fillIx + 1 == nPoints ? 0 : fillIx + 1];
-                            float2 xymin = min(start, end);
-                            float2 xymax = max(start, end);
-                            if (xymax.y >= y0 && xymin.y < y0 + tileHeight && xymin.x < sx0 + stw) {
-                                // set up line equation, ax + by + c = 0
-                                float a = end.y - start.y;
-                                float b = start.x - end.x;
-                                float c = -(a * start.x + b * start.y);
-                                float left = a * sx0;
-                                float right = a * (sx0 + stw);
-                                float ytop = max(float(y0), xymin.y);
-                                float ybot = min(float(y0 + tileHeight), xymax.y);
-                                float top = b * ytop;
-                                float bot = b * ybot;
-                                // top left of rightmost tile in strip
-                                float sTopLeft = sign(right - a * (tileWidth) + float(y0) * b + c);
-                                float s00 = sign(top + left + c);
-                                float s01 = sign(top + right + c);
-                                float s10 = sign(bot + left + c);
-                                float s11 = sign(bot + right + c);
-                                if (sTopLeft == sign(a) && xymin.y <= y0) {
-                                    // left ray intersects, need backdrop
-                                    fillHit = true;
-                                }
-                                if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0 && xymax.x > sx0) {
-                                    // intersects strip
-                                    fillHit = true;
-                                }
+                        break;
+                    case PIET_ITEM_LINE: {
+                        // set up line equation, ax + by + c = 0
+                        if (hit) {
+                            device const PietStrokeLine &line = items[ix].line;
+                            float a = line.end.y - line.start.y;
+                            float b = line.start.x - line.end.x;
+                            float c = -(a * line.start.x + b * line.start.y);
+                            // TODO: is this bound as tight as it can be?
+                            float hw = 0.5 * line.width + 0.5;
+                            float left = a * (x0 - hw);
+                            float right = a * (x0 + tileWidth + hw);
+                            float top = b * (y0 - hw);
+                            float bot = b * (y0 + tileHeight + hw);
+                            // If all four corners are on same side of line, cull
+                            float s00 = sign(top + left + c);
+                            float s01 = sign(top + right + c);
+                            float s10 = sign(bot + left + c);
+                            float s11 = sign(bot + right + c);
+                            if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
+                                encoder.encodeLine(line.start, line.end);
+                                encoder.encodeStroke(line.rgbaColor, line.width);
                             }
                         }
-                        uint fillVote = simd_vote::vote_t(simd_ballot(fillHit));
-                        while (fillVote) {
-                            uint fillSubIx = ctz(fillVote);
-                            fillIx = j + fillSubIx;
-
-                            if (hit) {
+                        break;
+                    }
+                    case PIET_ITEM_FILL: {
+                        device const PietFill &fill = items[ix].fill;
+                        device const float2 *pts = (device const float2 *)(scene + fill.pointsIx);
+                        uint nPoints = fill.nPoints;
+                        float backdrop = 0;
+                        bool anyFill = false;
+                        // use simd ballot to quick-reject segments with no contribution
+                        // Note: we just do 16 at a time for now, there's the option of doing
+                        // a 16x2 strip of tiles, with more complexity in the left-ray test.
+                        for (uint j = 0; j < nPoints; j += 16) {
+                            bool fillHit = false;
+                            uint fillIx = j + (tix & 15);
+                            if (fillIx < nPoints) {
                                 float2 start = pts[fillIx];
                                 float2 end = pts[fillIx + 1 == nPoints ? 0 : fillIx + 1];
                                 float2 xymin = min(start, end);
                                 float2 xymax = max(start, end);
-                                // Note: no y-based cull here because it's been done in the earlier pass.
-                                // If we change that to do a strip taller than 1 tile, re-introduce here.
-
-                                // set up line equation, ax + by + c = 0
-                                float a = end.y - start.y;
-                                float b = start.x - end.x;
-                                float c = -(a * start.x + b * start.y);
-                                float left = a * x0;
-                                float right = a * (x0 + tileWidth);
-                                float ytop = max(float(y0), xymin.y);
-                                float ybot = min(float(y0 + tileHeight), xymax.y);
-                                float top = b * ytop;
-                                float bot = b * ybot;
-                                // top left of tile
-                                float sTopLeft = sign(left + float(y0) * b + c);
-                                float s00 = sign(top + left + c);
-                                float s01 = sign(top + right + c);
-                                float s10 = sign(bot + left + c);
-                                float s11 = sign(bot + right + c);
-                                if (sTopLeft == sign(a) && xymin.y <= y0) {
-                                    backdrop -= s00;
+                                if (xymax.y >= y0 && xymin.y < y0 + tileHeight && xymin.x < sx0 + stw) {
+                                    // set up line equation, ax + by + c = 0
+                                    float a = end.y - start.y;
+                                    float b = start.x - end.x;
+                                    float c = -(a * start.x + b * start.y);
+                                    float left = a * sx0;
+                                    float right = a * (sx0 + stw);
+                                    float ytop = max(float(y0), xymin.y);
+                                    float ybot = min(float(y0 + tileHeight), xymax.y);
+                                    float top = b * ytop;
+                                    float bot = b * ybot;
+                                    // top left of rightmost tile in strip
+                                    float sTopLeft = sign(right - a * (tileWidth) + float(y0) * b + c);
+                                    float s00 = sign(top + left + c);
+                                    float s01 = sign(top + right + c);
+                                    float s10 = sign(bot + left + c);
+                                    float s11 = sign(bot + right + c);
+                                    if (sTopLeft == sign(a) && xymin.y <= y0) {
+                                        // left ray intersects, need backdrop
+                                        fillHit = true;
+                                    }
+                                    if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0 && xymax.x > sx0) {
+                                        // intersects strip
+                                        fillHit = true;
+                                    }
+                                    // TODO: maybe avoid boolean - does it cost a register?
+                                    if (fillHit) {
+                                        atomic_fetch_or_explicit(&bitmap, 1 << tix, relaxed);
+                                    }
                                 }
-                                if (xymin.x < x0 && xymax.x > x0) {
-                                    float yEdge = mix(start.y, end.y, (start.x - x0) / b);
-                                    if (yEdge >= y0 && yEdge < y0 + tileHeight) {
-                                        // line intersects left edge of this tile
-                                        encoder.encodeFillEdge(s00, yEdge);
-                                        if (b > 0.0) {
-                                            encoder.encodeFill(start, float2(x0, yEdge));
-                                        } else {
-                                            encoder.encodeFill(float2(x0, yEdge), end);
+                            }
+                            threadgroup_barrier(mem_flags::mem_threadgroup);
+                            if (tix == 0) {
+                                rd = atomic_load_explicit(&bitmap, relaxed);
+                                atomic_store_explicit(&bitmap, 0, relaxed);
+                            }
+                            threadgroup_barrier(mem_flags::mem_threadgroup);
+                            uint fillVote = (rd >> (tix & 16)) & 0xffff;
+                            while (fillVote) {
+                                uint fillSubIx = ctz(fillVote);
+                                fillIx = j + fillSubIx;
+
+                                if (hit) {
+                                    float2 start = pts[fillIx];
+                                    float2 end = pts[fillIx + 1 == nPoints ? 0 : fillIx + 1];
+                                    float2 xymin = min(start, end);
+                                    float2 xymax = max(start, end);
+                                    // Note: no y-based cull here because it's been done in the earlier pass.
+                                    // If we change that to do a strip taller than 1 tile, re-introduce here.
+
+                                    // set up line equation, ax + by + c = 0
+                                    float a = end.y - start.y;
+                                    float b = start.x - end.x;
+                                    float c = -(a * start.x + b * start.y);
+                                    float left = a * x0;
+                                    float right = a * (x0 + tileWidth);
+                                    float ytop = max(float(y0), xymin.y);
+                                    float ybot = min(float(y0 + tileHeight), xymax.y);
+                                    float top = b * ytop;
+                                    float bot = b * ybot;
+                                    // top left of tile
+                                    float sTopLeft = sign(left + float(y0) * b + c);
+                                    float s00 = sign(top + left + c);
+                                    float s01 = sign(top + right + c);
+                                    float s10 = sign(bot + left + c);
+                                    float s11 = sign(bot + right + c);
+                                    if (sTopLeft == sign(a) && xymin.y <= y0) {
+                                        backdrop -= s00;
+                                    }
+                                    if (xymin.x < x0 && xymax.x > x0) {
+                                        float yEdge = mix(start.y, end.y, (start.x - x0) / b);
+                                        if (yEdge >= y0 && yEdge < y0 + tileHeight) {
+                                            // line intersects left edge of this tile
+                                            encoder.encodeFillEdge(s00, yEdge);
+                                            if (b > 0.0) {
+                                                encoder.encodeFill(start, float2(x0, yEdge));
+                                            } else {
+                                                encoder.encodeFill(float2(x0, yEdge), end);
+                                            }
+                                            anyFill = true;
+                                        } else if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
+                                            encoder.encodeFill(start, end);
+                                            anyFill = true;
                                         }
-                                        anyFill = true;
-                                    } else if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
+                                    } else if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0
+                                               && xymin.x < x0 + tileWidth && xymax.x > x0) {
                                         encoder.encodeFill(start, end);
                                         anyFill = true;
                                     }
-                                } else if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0
-                                           && xymin.x < x0 + tileWidth && xymax.x > x0) {
-                                    encoder.encodeFill(start, end);
-                                    anyFill = true;
-                                }
-                            } // end if (hit)
+                                } // end if (hit)
 
-                            fillVote &= ~(1 << fillSubIx);
-                        }
-                    }
-                    if (anyFill) {
-                        encoder.encodeDrawFill(fill, backdrop);
-                    } else if (backdrop != 0.0) {
-                        encoder.encodeSolid(fill.rgbaColor);
-                    }
-                    break;
-                }
-                case PIET_ITEM_STROKE_POLYLINE: {
-                    device const PietStrokePolyLine &poly = items[ix].poly;
-                    device const float2 *pts = (device const float2 *)(scene + poly.pointsIx);
-                    uint nPoints = poly.nPoints - 1;
-                    bool anyStroke = false;
-                    float hw = 0.5 * poly.width + 0.5;
-                    // use simd ballot to quick-reject segments with no contribution
-                    for (uint j = 0; j < nPoints; j += 16) {
-                        bool polyHit = false;
-                        uint polyIx = j + tix;
-                        if (polyIx < nPoints && tix < 16) {
-                            float2 start = pts[polyIx];
-                            float2 end = pts[polyIx + 1];
-                            float2 xymin = min(start, end);
-                            float2 xymax = max(start, end);
-                            if (xymax.y > sy0 - hw && xymin.y < sy0 + sth + hw &&
-                                xymax.x > sx0 - hw && xymin.x < sx0 + stw + hw) {
-                                // set up line equation, ax + by + c = 0
-                                float a = end.y - start.y;
-                                float b = start.x - end.x;
-                                float c = -(a * start.x + b * start.y);
-                                float left = a * (sx0 - hw);
-                                float right = a * (sx0 + stw + hw);
-                                float top = b * (y0 - hw);
-                                float bot = b * (y0 + tileHeight + hw);
-                                float s00 = sign(top + left + c);
-                                float s01 = sign(top + right + c);
-                                float s10 = sign(bot + left + c);
-                                float s11 = sign(bot + right + c);
-                                if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
-                                    // intersects strip
-                                    polyHit = true;
-                                }
+                                fillVote &= ~(1 << fillSubIx);
                             }
                         }
-                        uint polyVote = simd_vote::vote_t(simd_ballot(polyHit));
-                        while (polyVote) {
-                            uint polySubIx = ctz(polyVote);
-                            polyIx = j + polySubIx;
-                            
-                            if (hit) {
+                        if (anyFill) {
+                            encoder.encodeDrawFill(fill, backdrop);
+                        } else if (backdrop != 0.0) {
+                            encoder.encodeSolid(fill.rgbaColor);
+                        }
+                        break;
+                    }
+                    case PIET_ITEM_STROKE_POLYLINE: {
+                        device const PietStrokePolyLine &poly = items[ix].poly;
+                        device const float2 *pts = (device const float2 *)(scene + poly.pointsIx);
+                        uint nPoints = poly.nPoints - 1;
+                        bool anyStroke = false;
+                        float hw = 0.5 * poly.width + 0.5;
+                        // use simd ballot to quick-reject segments with no contribution
+                        for (uint j = 0; j < nPoints; j += 32) {
+                            uint polyIx = j + tix;
+                            if (polyIx < nPoints) {
                                 float2 start = pts[polyIx];
                                 float2 end = pts[polyIx + 1];
                                 float2 xymin = min(start, end);
                                 float2 xymax = max(start, end);
-                                if (xymax.y > y0 - hw && xymin.y < y0 + tileHeight + hw &&
-                                    xymax.x > x0 - hw && xymin.x < x0 + tileWidth + hw) {
+                                if (xymax.y > sy0 - hw && xymin.y < sy0 + sth + hw &&
+                                    xymax.x > sx0 - hw && xymin.x < sx0 + stw + hw) {
+                                    // set up line equation, ax + by + c = 0
                                     float a = end.y - start.y;
                                     float b = start.x - end.x;
                                     float c = -(a * start.x + b * start.y);
-                                    float hw = 0.5 * poly.width + 0.5;
-                                    float left = a * (x0 - hw);
-                                    float right = a * (x0 + tileWidth + hw);
+                                    float left = a * (sx0 - hw);
+                                    float right = a * (sx0 + stw + hw);
                                     float top = b * (y0 - hw);
                                     float bot = b * (y0 + tileHeight + hw);
-                                    // If all four corners are on same side of line, cull
                                     float s00 = sign(top + left + c);
                                     float s01 = sign(top + right + c);
                                     float s10 = sign(bot + left + c);
                                     float s11 = sign(bot + right + c);
                                     if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
-                                        encoder.encodeLine(start, end);
-                                        anyStroke = true;
+                                        // intersects strip
+                                        atomic_fetch_or_explicit(&bitmap, 1 << tix, relaxed);
                                     }
                                 }
-                            } // end if (hit)
-                            
-                            polyVote &= ~(1 << polySubIx);
+                            }
+                            threadgroup_barrier(mem_flags::mem_threadgroup);
+                            if (tix == 0) {
+                                rd = atomic_load_explicit(&bitmap, relaxed);
+                                atomic_store_explicit(&bitmap, 0, relaxed);
+                            }
+                            threadgroup_barrier(mem_flags::mem_threadgroup);
+                            uint polyVote = rd;
+                            while (polyVote) {
+                                uint polySubIx = ctz(polyVote);
+                                polyIx = j + polySubIx;
+                                
+                                if (hit) {
+                                    float2 start = pts[polyIx];
+                                    float2 end = pts[polyIx + 1];
+                                    float2 xymin = min(start, end);
+                                    float2 xymax = max(start, end);
+                                    if (xymax.y > y0 - hw && xymin.y < y0 + tileHeight + hw &&
+                                        xymax.x > x0 - hw && xymin.x < x0 + tileWidth + hw) {
+                                        float a = end.y - start.y;
+                                        float b = start.x - end.x;
+                                        float c = -(a * start.x + b * start.y);
+                                        float hw = 0.5 * poly.width + 0.5;
+                                        float left = a * (x0 - hw);
+                                        float right = a * (x0 + tileWidth + hw);
+                                        float top = b * (y0 - hw);
+                                        float bot = b * (y0 + tileHeight + hw);
+                                        // If all four corners are on same side of line, cull
+                                        float s00 = sign(top + left + c);
+                                        float s01 = sign(top + right + c);
+                                        float s10 = sign(bot + left + c);
+                                        float s11 = sign(bot + right + c);
+                                        if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
+                                            encoder.encodeLine(start, end);
+                                            anyStroke = true;
+                                        }
+                                    }
+                                } // end if (hit)
+                                
+                                polyVote &= ~(1 << polySubIx);
+                            }
                         }
+                        if (anyStroke) {
+                            encoder.encodeStroke(poly.rgbaColor, poly.width);
+                        }
+                        break;
                     }
-                    if (anyStroke) {
-                        encoder.encodeStroke(poly.rgbaColor, poly.width);
-                    }
-                    break;
-                }
-            }
-            v &= ~(1 << k);  // aka v &= (v - 1)
-        }
+                } // end switch(itemType);
+                v &= v - 1;
+            } // end while (v)
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        //} // end for (bitmapIx)
     }
     uint solidColor = encoder.end();
     outTexture.write(unpack_unorm4x8_to_half(solidColor), gid);
