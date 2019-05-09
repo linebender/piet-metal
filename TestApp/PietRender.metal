@@ -24,7 +24,9 @@ vertexShader(uint vertexID [[ vertex_id ]],
     out.clipSpacePosition.w = 1.0;
     float2 xy = vertexArray[vertexID].textureCoordinate;
     out.textureCoordinate = xy;
-    out.pointSize = 16;
+    // Note: this assumes tileWidth == tileHeight
+    // If this is not true, a quad made of 2 tris is a better choice.
+    out.pointSize = tileWidth;
     uint2 tileXY = uint2(xy.x / tileWidth, xy.y / tileHeight);
     out.solidColor = loTexture.read(tileXY);
     return out;
@@ -230,9 +232,18 @@ tileKernel(device const char *scene [[buffer(0)]],
     device char *dst = tiles + tileIx * tileBufSize;
     TileEncoder encoder(dst);
     
-    // Size of the region covered by one SIMD group. TODO, don't hardcode.
-    const ushort stw = 16 * tileWidth;
-    const ushort sth = (sgSize / 16) * tileHeight;
+    // I think on some hardware the SIMD group size is 64. Right now we
+    // just limit it to 32 because I can't figure out easily how to do the
+    // ctz on 64 bit values. Might be worth coming back to this, always
+    // possible to represent v as two uints.
+    const uint groupSize = sgSize < 32 ? sgSize : 32;
+    // Careful to avoid undefined behavior; there might be a cleaner way to write this.
+    const uint groupMask = groupSize == 32 ? ~0u : (1 << groupSize) - 1;
+    const uint groupWidth = tilerGroupWidth < sgSize ? tilerGroupWidth : sgSize;
+
+    // Size of the region covered by one group
+    const ushort stw = groupWidth * tileWidth;
+    const ushort sth = (groupSize / groupWidth) * tileHeight;
     ushort sx0 = x0 & ~(stw - 1);
     ushort sy0 = y0 & ~(sth - 1);
     
@@ -240,14 +251,15 @@ tileKernel(device const char *scene [[buffer(0)]],
     device const ushort4 *bboxes = (device const ushort4 *)&group->bbox[0];
     uint n = group->nItems;
     device const PietItem *items = (device const PietItem *)(scene + group->itemsIx);
-    for (uint i = 0; i < n; i += sgSize) {
+    for (uint i = 0; i < n; i += groupSize) {
         bool hitCoarse = false;
-        if (i + tix < n) {
-            ushort4 bbox = bboxes[i + tix];
+        uint groupTix = tix & (groupSize - 1);
+        if (i + groupTix < n) {
+            ushort4 bbox = bboxes[i + groupTix];
             hitCoarse = bbox.z >= sx0 && bbox.x < sx0 + stw && bbox.w >= sy0 && bbox.y < sy0 + sth;
         }
         simd_vote vote = simd_ballot(hitCoarse);
-        uint v = simd_vote::vote_t(vote);
+        uint v = (simd_vote::vote_t(vote) >> (tix & ~(groupSize - 1))) & groupMask;
         while (v) {
             uint k = ctz(v);
             // To explore: use simd_broadcast rather then second global memory read.
@@ -293,12 +305,13 @@ tileKernel(device const char *scene [[buffer(0)]],
                     float backdrop = 0;
                     bool anyFill = false;
                     // use simd ballot to quick-reject segments with no contribution
-                    // Note: we just do 16 at a time for now, there's the option of doing
-                    // a 16x2 strip of tiles, with more complexity in the left-ray test.
-                    for (uint j = 0; j < nPoints; j += 16) {
+                    // Note: we only do a strip 1 tile tall for now. We could do a taller strip
+                    // but that would require more complexity in the left-ray test.
+                    for (uint j = 0; j < nPoints; j += groupWidth) {
                         bool fillHit = false;
-                        uint fillIx = j + tix;
-                        if (fillIx < nPoints && tix < 16) {
+                        uint gTix = tix & (groupSize - 1);
+                        uint fillIx = j + gTix;
+                        if (fillIx < nPoints && gTix < groupWidth) {
                             float2 start = pts[fillIx];
                             float2 end = pts[fillIx + 1 == nPoints ? 0 : fillIx + 1];
                             float2 xymin = min(start, end);
@@ -330,7 +343,7 @@ tileKernel(device const char *scene [[buffer(0)]],
                                 }
                             }
                         }
-                        uint fillVote = simd_vote::vote_t(simd_ballot(fillHit));
+                        uint fillVote = (simd_vote::vote_t(simd_ballot(fillHit)) >> (tix & ~(groupSize - 1))) & groupMask;
                         while (fillVote) {
                             uint fillSubIx = ctz(fillVote);
                             fillIx = j + fillSubIx;
@@ -401,10 +414,11 @@ tileKernel(device const char *scene [[buffer(0)]],
                     bool anyStroke = false;
                     float hw = 0.5 * poly.width + 0.5;
                     // use simd ballot to quick-reject segments with no contribution
-                    for (uint j = 0; j < nPoints; j += 16) {
+                    for (uint j = 0; j < nPoints; j += groupWidth) {
                         bool polyHit = false;
-                        uint polyIx = j + tix;
-                        if (polyIx < nPoints && tix < 16) {
+                        uint gTix = tix & (groupSize - 1);
+                        uint polyIx = j + gTix;
+                        if (polyIx < nPoints && gTix < groupWidth) {
                             float2 start = pts[polyIx];
                             float2 end = pts[polyIx + 1];
                             float2 xymin = min(start, end);
@@ -429,7 +443,7 @@ tileKernel(device const char *scene [[buffer(0)]],
                                 }
                             }
                         }
-                        uint polyVote = simd_vote::vote_t(simd_ballot(polyHit));
+                        uint polyVote = (simd_vote::vote_t(simd_ballot(polyHit)) >> (tix & ~(groupSize - 1))) & groupMask;
                         while (polyVote) {
                             uint polySubIx = ctz(polyVote);
                             polyIx = j + polySubIx;
