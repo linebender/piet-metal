@@ -4,7 +4,7 @@ use std::mem;
 use std::ptr::copy_nonoverlapping;
 use std::str::FromStr;
 
-use kurbo::{BezPath, Circle, Line, Vec2, Rect, Shape};
+use kurbo::{BezPath, Circle, Line, Vec2, Point, Rect, Shape};
 
 use roxmltree::Document;
 
@@ -97,7 +97,7 @@ impl ShortBbox {
     }
 }
 
-fn vec2_to_f32s(point: Vec2) -> (f32, f32) {
+fn point_to_f32s(point: Point) -> (f32, f32) {
     (point.x as f32, point.y as f32)
 }
 
@@ -175,8 +175,8 @@ impl<'a> Encoder<'a> {
             flags: Default::default(),
             rgba: rgba.to_be(),
             width,
-            start: vec2_to_f32s(line.p0),
-            end: vec2_to_f32s(line.p1),
+            start: point_to_f32s(line.p0),
+            end: point_to_f32s(line.p1),
         };
         // TODO: do we need to add an additional 0.5?
         let hw = (width * 0.5) as f64;
@@ -187,7 +187,7 @@ impl<'a> Encoder<'a> {
     }
 
     // Signature will change, need to deal with subpaths and also want curves.
-    pub fn fill(&mut self, points: &[Vec2], rgba: u32) {
+    pub fn fill(&mut self, points: &[Point], rgba: u32) {
         let (points_ix, bbox) = self.encode_points(points);
         let piet_fill = PietFill {
             item_type: ItemType::Fill,
@@ -201,7 +201,7 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    pub fn polyline(&mut self, points: &[Vec2], rgba: u32, width: f32) {
+    pub fn polyline(&mut self, points: &[Point], rgba: u32, width: f32) {
         let (points_ix, bbox) = self.encode_points(points);
         let piet_poly = PietStrokePolyLine {
             item_type: ItemType::StrokePolyLine,
@@ -216,7 +216,7 @@ impl<'a> Encoder<'a> {
         }
     }
 
-    pub fn encode_points(&mut self, points: &[Vec2]) -> (usize, Rect) {
+    pub fn encode_points(&mut self, points: &[Point]) -> (usize, Rect) {
         let points_ix = self.alloc(points.len() * mem::size_of::<(f32, f32)>());
         let mut dst = points_ix;
         let mut bbox = None;
@@ -226,7 +226,7 @@ impl<'a> Encoder<'a> {
                 Some(old_bbox) => Some(old_bbox.union_pt(pt)),
             };
             unsafe {
-                self.write_struct(dst, &vec2_to_f32s(pt));
+                self.write_struct(dst, &point_to_f32s(pt));
                 dst += mem::size_of::<(f32, f32)>();
             }
         }
@@ -248,7 +248,7 @@ impl<'a> Encoder<'a> {
 fn make_cardioid(encoder: &mut Encoder) {
     let n = 97;
     let dth = std::f64::consts::PI * 2.0 / (n as f64);
-    let center = Vec2::new(1024.0, 768.0);
+    let center = Point::new(1024.0, 768.0);
     let r = 750.0;
     encoder.begin_group((n - 1) * 2);
     for i in 1..n {
@@ -263,7 +263,7 @@ fn make_cardioid(encoder: &mut Encoder) {
 #[allow(unused)]
 fn make_path_test(encoder: &mut Encoder) {
     encoder.begin_group(1);
-    encoder.fill(&[Vec2::new(10.0, 10.0), Vec2::new(15.0, 800.0), Vec2::new(300.0, 500.0)], 0x80e0);
+    encoder.fill(&[Point::new(10.0, 10.0), Point::new(15.0, 800.0), Point::new(300.0, 500.0)], 0x80e0);
     encoder.end_group();
 }
 
