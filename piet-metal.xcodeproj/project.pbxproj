@@ -41,6 +41,7 @@
 		AE20EE1B227773A000207011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AE20EE1C227773A000207011 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		AE20EE1E227773A000207011 /* piet_metal.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = piet_metal.entitlements; sourceTree = "<group>"; };
+		AE340C0923C546BF00F9D470 /* GenTypes.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GenTypes.h; sourceTree = "<group>"; };
 		AE95B96F227CBC1B0038195A /* libpiet_metal.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libpiet_metal.a; path = target/debug/libpiet_metal.a; sourceTree = "<group>"; };
 		AE95B975227CBDCD0038195A /* libpiet_metal.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libpiet_metal.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		AE95B979227CBE590038195A /* piet_metal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = piet_metal.h; path = include/piet_metal.h; sourceTree = "<group>"; };
@@ -103,6 +104,7 @@
 				AEA81C9B227A698E0051DAD5 /* SceneEncoder.m */,
 				AE20EE132277739F00207011 /* ViewController.h */,
 				AE20EE142277739F00207011 /* ViewController.m */,
+				AE340C0923C546BF00F9D470 /* GenTypes.h */,
 			);
 			path = TestApp;
 			sourceTree = "<group>";

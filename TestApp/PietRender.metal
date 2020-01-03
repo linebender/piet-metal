@@ -3,7 +3,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-#include "PietShaderTypes.h"
+#include "GenTypes.h"
 
 struct RenderData {
     float4 clipSpacePosition [[position]];
@@ -175,11 +175,11 @@ public:
         cmd->y = y;
         dst += sizeof(CmdFillEdge);
     }
-    void encodeDrawFill(const device PietFill &fill, int backdrop) {
+    void encodeDrawFill(const thread PietFillPacked &fill, int backdrop) {
         device CmdDrawFill *cmd = (device CmdDrawFill *)dst;
         cmd->cmd = CMD_DRAW_FILL;
         cmd->backdrop = backdrop;
-        cmd->rgba = fill.rgbaColor;
+        cmd->rgba = fill.rgba_color;
         solidColor = 0;
         dst += sizeof(CmdDrawFill);
     }
@@ -241,10 +241,12 @@ tileKernel(device const char *scene [[buffer(0)]],
     ushort sx0 = x0 & ~(stw - 1);
     ushort sy0 = y0 & ~(sth - 1);
     
-    device const SimpleGroup *group = (device const SimpleGroup *)scene;
-    device const ushort4 *bboxes = (device const ushort4 *)&group->bbox[0];
-    uint n = group->nItems;
-    device const PietItem *items = (device const PietItem *)(scene + group->itemsIx);
+    SimpleGroupRef group_ref = 0;
+    // TODO: write accessor functions for variable-sized array here
+    device const SimpleGroupPacked *group = (device const SimpleGroupPacked *)scene;
+    device const ushort4 *bboxes = (device const ushort4 *)&group->bbox;
+    uint n = SimpleGroup_n_items(scene, group_ref);
+    PietItemRef items_ref = SimpleGroup_items_ix(scene, group_ref);
     for (uint i = 0; i < n; i += tgs) {
         if (tix < nBitmap) {
             atomic_store_explicit(&bitmap, 0, relaxed);
@@ -269,7 +271,8 @@ tileKernel(device const char *scene [[buffer(0)]],
                 uint ix = i + ctz(v);
                 ushort4 bbox = bboxes[ix];
                 bool hit = bbox.z >= x0 && bbox.x < x0 + tileWidth && bbox.w >= y0 && bbox.y < y0 + tileHeight;
-                ushort itemType = items[ix].itemType;
+                PietItemRef item_ref = items_ref + ix * sizeof(PietItem);
+                ushort itemType = PietItem_tag(scene, item_ref);
                 switch (itemType) {
                     case PIET_ITEM_CIRCLE:
                         if (hit) {
@@ -279,7 +282,7 @@ tileKernel(device const char *scene [[buffer(0)]],
                     case PIET_ITEM_LINE: {
                         // set up line equation, ax + by + c = 0
                         if (hit) {
-                            device const PietStrokeLine &line = items[ix].line;
+                            PietStrokeLinePacked line = PietStrokeLine_read(scene, item_ref);
                             float a = line.end.y - line.start.y;
                             float b = line.start.x - line.end.x;
                             float c = -(a * line.start.x + b * line.start.y);
@@ -296,15 +299,15 @@ tileKernel(device const char *scene [[buffer(0)]],
                             float s11 = sign(bot + right + c);
                             if (s00 * s01 + s00 * s10 + s00 * s11 < 3.0) {
                                 encoder.encodeLine(line.start, line.end);
-                                encoder.encodeStroke(line.rgbaColor, line.width);
+                                encoder.encodeStroke(line.rgba_color, line.width);
                             }
                         }
                         break;
                     }
                     case PIET_ITEM_FILL: {
-                        device const PietFill &fill = items[ix].fill;
-                        device const float2 *pts = (device const float2 *)(scene + fill.pointsIx);
-                        uint nPoints = fill.nPoints;
+                        PietFillPacked fill = PietFill_read(scene, item_ref);
+                        device const float2 *pts = (device const float2 *)(scene + fill.points_ix);
+                        uint nPoints = fill.n_points;
                         float backdrop = 0;
                         bool anyFill = false;
                         // use simd ballot to quick-reject segments with no contribution
@@ -415,14 +418,14 @@ tileKernel(device const char *scene [[buffer(0)]],
                         if (anyFill) {
                             encoder.encodeDrawFill(fill, backdrop);
                         } else if (backdrop != 0.0) {
-                            encoder.encodeSolid(fill.rgbaColor);
+                            encoder.encodeSolid(fill.rgba_color);
                         }
                         break;
                     }
                     case PIET_ITEM_STROKE_POLYLINE: {
-                        device const PietStrokePolyLine &poly = items[ix].poly;
-                        device const float2 *pts = (device const float2 *)(scene + poly.pointsIx);
-                        uint nPoints = poly.nPoints - 1;
+                        PietStrokePolyLinePacked poly = PietStrokePolyLine_read(scene, item_ref);
+                        device const float2 *pts = (device const float2 *)(scene + poly.points_ix);
+                        uint nPoints = poly.n_points - 1;
                         bool anyStroke = false;
                         float hw = 0.5 * poly.width + 0.5;
                         // use simd ballot to quick-reject segments with no contribution
@@ -495,7 +498,7 @@ tileKernel(device const char *scene [[buffer(0)]],
                             }
                         }
                         if (anyStroke) {
-                            encoder.encodeStroke(poly.rgbaColor, poly.width);
+                            encoder.encodeStroke(poly.rgba_color, poly.width);
                         }
                         break;
                     }
