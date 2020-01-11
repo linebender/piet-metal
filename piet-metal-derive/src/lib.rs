@@ -377,6 +377,31 @@ impl GpuTypeDef {
         }
         r
     }
+
+    fn to_metal_wr(&self, _module: &GpuModule) -> String {
+        let mut r = String::new();
+        match self {
+            GpuTypeDef::Struct(name, _fields) => {
+                // Write of packed structure
+                write!(
+                    r,
+                    "void {}_write(device char *buf, {}Ref ref, {}Packed s) {{\n",
+                    name, name, name
+                )
+                .unwrap();
+                write!(
+                    r,
+                    "    *((device {}Packed *)(buf + ref)) = s;\n",
+                    name
+                )
+                .unwrap();
+                write!(r, "}}\n").unwrap();
+            }
+            // We don't write enum structs, we only write their variants.
+            _ => (),
+        }
+        r
+    }
 }
 
 impl GpuModule {
@@ -414,6 +439,14 @@ impl GpuModule {
         }
         for def in &self.defs {
             r.push_str(&def.to_metal(self));
+        }
+        r
+    }
+
+    fn to_metal_wr(&self) -> String {
+        let mut r = String::new();
+        for def in &self.defs {
+            r.push_str(&def.to_metal_wr(self));
         }
         r
     }
@@ -462,9 +495,13 @@ pub fn piet_metal(input: TokenStream) -> TokenStream {
     let module = GpuModule::from_syn(&input).unwrap();
     let gen_metal_fn = format_ident!("gen_metal_{}", input.ident);
     let result = module.to_metal();
+    let result_wr = module.to_metal_wr();
     let expanded = quote! {
-        fn #gen_metal_fn() {
+        fn #gen_metal_fn(gpu_write: bool) {
             println!("{}", #result);
+            if gpu_write {
+                println!("{}", #result_wr);
+            }
         }
     };
     expanded.into()
