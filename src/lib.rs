@@ -4,7 +4,7 @@ use std::mem;
 use std::ptr::copy_nonoverlapping;
 use std::str::FromStr;
 
-use kurbo::{BezPath, Circle, Line, Vec2, Point, Rect, Shape};
+use kurbo::{BezPath, Circle, Line, Point, Rect, Shape, Vec2};
 
 use roxmltree::Document;
 
@@ -83,7 +83,6 @@ pub struct Encoder<'a> {
     group_ix: usize,
     // Start index of currently open group.
     group_start: usize,
-
 }
 
 impl ShortBbox {
@@ -123,7 +122,11 @@ impl<'a> Encoder<'a> {
     pub unsafe fn write_struct<T>(&mut self, ix: usize, s: &T) {
         let len = mem::size_of::<T>();
         //println!("writing {} bytes at {}", len, ix);
-        copy_nonoverlapping(s as *const T as *const u8, self.buf[ix..ix + len].as_mut_ptr(), len);
+        copy_nonoverlapping(
+            s as *const T as *const u8,
+            self.buf[ix..ix + len].as_mut_ptr(),
+            len,
+        );
     }
 
     pub fn begin_group(&mut self, n_items: usize) {
@@ -147,10 +150,12 @@ impl<'a> Encoder<'a> {
 
     unsafe fn add_item<T>(&mut self, item: &T, bbox: ShortBbox) {
         assert!(self.group_ix < self.group_count);
-        let bbox_ix = self.group_start + mem::size_of::<SimpleGroup>() 
+        let bbox_ix = self.group_start
+            + mem::size_of::<SimpleGroup>()
             + self.group_ix * mem::size_of::<ShortBbox>();
         self.write_struct(bbox_ix, &bbox);
-        let item_ix = self.group_start + mem::size_of::<SimpleGroup>()
+        let item_ix = self.group_start
+            + mem::size_of::<SimpleGroup>()
             + self.group_count * mem::size_of::<ShortBbox>()
             + self.group_ix * mem::size_of::<PietItem>();
         self.write_struct(item_ix, item);
@@ -238,7 +243,11 @@ impl<'a> Encoder<'a> {
     fn debug_print(&self) {
         unsafe {
             for i in (0..self.free_space).step_by(4) {
-                println!("{:04x}: {:08x}", i, std::ptr::read((self.buf.as_ptr().add(i) as *const u32)));
+                println!(
+                    "{:04x}: {:08x}",
+                    i,
+                    std::ptr::read((self.buf.as_ptr().add(i) as *const u32))
+                );
             }
         }
     }
@@ -263,10 +272,16 @@ fn make_cardioid(encoder: &mut Encoder) {
 #[allow(unused)]
 fn make_path_test(encoder: &mut Encoder) {
     encoder.begin_group(1);
-    encoder.fill(&[Point::new(10.0, 10.0), Point::new(15.0, 800.0), Point::new(300.0, 500.0)], 0x80e0);
+    encoder.fill(
+        &[
+            Point::new(10.0, 10.0),
+            Point::new(15.0, 800.0),
+            Point::new(300.0, 500.0),
+        ],
+        0x80e0,
+    );
     encoder.end_group();
 }
-
 
 fn make_tiger(encoder: &mut Encoder) {
     let scale = 8.0;
@@ -285,7 +300,7 @@ fn make_tiger(encoder: &mut Encoder) {
                 }
                 if path.attribute("stroke").is_some() {
                     n_items += count_stroke_items(&xform_path);
-                }                
+                }
             }
         }
     }
@@ -370,7 +385,7 @@ fn parse_color(color: &str) -> u32 {
 }
 
 #[no_mangle]
-pub unsafe extern fn init_test_scene(scene_buf: *mut u8, buf_size: usize) {
+pub unsafe extern "C" fn init_test_scene(scene_buf: *mut u8, buf_size: usize) {
     let buf_slice = std::slice::from_raw_parts_mut(scene_buf, buf_size);
     let mut encoder = Encoder::new(buf_slice);
     make_test_scene(&mut encoder);
