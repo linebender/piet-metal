@@ -3,6 +3,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
+#include "PietShaderTypes.h"
 #include "GenTypes.h"
 
 struct RenderData {
@@ -214,12 +215,12 @@ tileKernel(device const char *scene [[buffer(0)]],
                 PietItemRef item_ref = items_ref + ix * sizeof(PietItem);
                 ushort itemType = PietItem_tag(scene, item_ref);
                 switch (itemType) {
-                    case PIET_ITEM_CIRCLE:
+                    case PietItem_Circle:
                         if (hit) {
                             encoder.encodeCircle(bbox);
                         }
                         break;
-                    case PIET_ITEM_LINE: {
+                    case PietItem_Line: {
                         // set up line equation, ax + by + c = 0
                         if (hit) {
                             PietStrokeLinePacked line = PietStrokeLine_read(scene, item_ref);
@@ -244,7 +245,7 @@ tileKernel(device const char *scene [[buffer(0)]],
                         }
                         break;
                     }
-                    case PIET_ITEM_FILL: {
+                    case PietItem_Fill: {
                         PietFillPacked fill = PietFill_read(scene, item_ref);
                         device const float2 *pts = (device const float2 *)(scene + fill.points_ix);
                         uint nPoints = fill.n_points;
@@ -362,7 +363,7 @@ tileKernel(device const char *scene [[buffer(0)]],
                         }
                         break;
                     }
-                    case PIET_ITEM_STROKE_POLYLINE: {
+                    case PietItem_Poly: {
                         PietStrokePolyLinePacked poly = PietStrokePolyLine_read(scene, item_ref);
                         device const float2 *pts = (device const float2 *)(scene + poly.points_ix);
                         uint nPoints = poly.n_points - 1;
