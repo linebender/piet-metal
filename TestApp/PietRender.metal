@@ -470,17 +470,15 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
     float df = 1e9;
     half signedArea = 0.0;
 
-    ushort cmd;
     while (1) {
-        cmd = Cmd_tag(src, 0);
-        if (cmd == Cmd_End) {
+        Cmd cmd = Cmd_read(src, 0);
+        uint tag = cmd.tag;
+        if (tag == Cmd_End) {
             break;
         }
-        switch (cmd) {
+        switch (tag) {
             case Cmd_Circle: {
-                // TODO: we should be reading these from `cmd`
-                CmdCirclePacked circle = CmdCircle_read(src, 0);
-                src += sizeof(Cmd);
+                CmdCirclePacked circle = CmdCircle_load(cmd);
                 ushort4 bbox = circle.bbox;
                 float2 xy0 = float2(bbox.x, bbox.y);
                 float2 xy1 = float2(bbox.z, bbox.w);
@@ -494,14 +492,12 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 break;
             }
             case Cmd_Line: {
-                CmdLinePacked line = CmdLine_read(src, 0);
-                src += sizeof(Cmd);
+                CmdLinePacked line = CmdLine_load(cmd);
                 stroke(df, xy, line.start, line.end);
                 break;
             }
             case Cmd_Stroke: {
-                CmdStrokePacked stroke = CmdStroke_read(src, 0);
-                src += sizeof(Cmd);
+                CmdStrokePacked stroke = CmdStroke_load(cmd);
                 half alpha = renderDf(df, stroke.halfWidth);
                 half4 fg = unpack_unorm4x8_srgb_to_half(stroke.rgba_color);
                 rgb = mix(rgb, fg.rgb, fg.a * alpha);
@@ -509,8 +505,7 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 break;
             }
             case Cmd_Fill: {
-                CmdFillPacked fill = CmdFill_read(src, 0);
-                src += sizeof(Cmd);
+                CmdFillPacked fill = CmdFill_load(cmd);
                 float2 start = fill.start - xy;
                 float2 end = fill.end - xy;
                 float2 window = saturate(float2(start.y, end.y));
@@ -532,14 +527,12 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 break;
             }
             case Cmd_FillEdge: {
-                CmdFillEdgePacked fill = CmdFillEdge_read(src, 0);
-                src += sizeof(Cmd);
+                CmdFillEdgePacked fill = CmdFillEdge_load(cmd);
                 signedArea += fill.sign * saturate(y - fill.y + 1);
                 break;
             }
             case Cmd_DrawFill: {
-                CmdDrawFillPacked draw = CmdDrawFill_read(src, 0);
-                src += sizeof(Cmd);
+                CmdDrawFillPacked draw = CmdDrawFill_load(cmd);
                 half alpha = signedArea + half(draw.backdrop);
                 alpha = min(abs(alpha), 1.0h); // nonzero winding rule
                 // even-odd is: alpha = abs(alpha - 2.0 * round(0.5 * alpha))
@@ -550,21 +543,19 @@ renderKernel(texture2d<half, access::write> outTexture [[texture(0)]],
                 break;
             }
             case Cmd_Solid: {
-                CmdSolidPacked solid = CmdSolid_read(src, 0);
-                src += sizeof(Cmd);
+                CmdSolidPacked solid = CmdSolid_load(cmd);
                 half4 fg = unpack_unorm4x8_srgb_to_half(solid.rgba_color);
                 rgb = mix(rgb, fg.rgb, fg.a);
                 break;
             }
             case Cmd_Bail:
                 return;
-            case 0:
-                outTexture.write(half4(0.0, 1.0, 0.0, 1.0), gid);
-                return;
+            // This case shouldn't happen, but we'll keep it for debugging.
             default:
                 outTexture.write(half4(1.0, 0.0, 1.0, 1.0), gid);
                 return;
         }
+        src += sizeof(Cmd);
     }
     // Linear to sRGB conversion. Note that if we had writable sRGB textures
     // we could let this be done in the write call.

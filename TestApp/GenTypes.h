@@ -145,13 +145,49 @@ struct PietItem {
     uint tag;
     uint body[7];
 };
+PietItem PietItem_read(const device char *buf, PietItemRef ref) {
+    return *((const device PietItem *)(buf + ref));
+}
 uint PietItem_tag(const device char *buf, PietItemRef ref) {
     return ((const device PietItem *)(buf + ref))->tag;
 }
 #define PietItem_Circle 1
+PietCirclePacked PietCircle_load(const thread PietItem &s) {
+    PietCirclePacked r;
+    r.tag = s.tag;
+    return r;
+}
 #define PietItem_Line 2
+PietStrokeLinePacked PietStrokeLine_load(const thread PietItem &s) {
+    PietStrokeLinePacked r;
+    r.tag = s.tag;
+    r.flags = *((const thread uint *)((const thread char *)&s + 4));
+    r.rgba_color = *((const thread uint *)((const thread char *)&s + 8));
+    r.width = *((const thread float *)((const thread char *)&s + 12));
+    r.start = *((const thread float2 *)((const thread char *)&s + 16));
+    r.end = *((const thread float2 *)((const thread char *)&s + 24));
+    return r;
+}
 #define PietItem_Fill 3
+PietFillPacked PietFill_load(const thread PietItem &s) {
+    PietFillPacked r;
+    r.tag = s.tag;
+    r.flags = *((const thread uint *)((const thread char *)&s + 4));
+    r.rgba_color = *((const thread uint *)((const thread char *)&s + 8));
+    r.n_points = *((const thread uint *)((const thread char *)&s + 12));
+    r.points_ix = *((const thread uint *)((const thread char *)&s + 16));
+    return r;
+}
 #define PietItem_Poly 4
+PietStrokePolyLinePacked PietStrokePolyLine_load(const thread PietItem &s) {
+    PietStrokePolyLinePacked r;
+    r.tag = s.tag;
+    r.rgba_color = *((const thread uint *)((const thread char *)&s + 4));
+    r.width = *((const thread float *)((const thread char *)&s + 8));
+    r.n_points = *((const thread uint *)((const thread char *)&s + 12));
+    r.points_ix = *((const thread uint *)((const thread char *)&s + 16));
+    return r;
+}
 
 typedef uint CmdCircleRef;
 typedef uint CmdLineRef;
@@ -255,17 +291,67 @@ struct Cmd {
     uint tag;
     uint body[5];
 };
+Cmd Cmd_read(const device char *buf, CmdRef ref) {
+    return *((const device Cmd *)(buf + ref));
+}
 uint Cmd_tag(const device char *buf, CmdRef ref) {
     return ((const device Cmd *)(buf + ref))->tag;
 }
 #define Cmd_End 1
 #define Cmd_Circle 2
+CmdCirclePacked CmdCircle_load(const thread Cmd &s) {
+    CmdCirclePacked r;
+    r.tag = s.tag;
+    r.bbox = *((const thread ushort4 *)((const thread char *)&s + 8));
+    return r;
+}
 #define Cmd_Line 3
+CmdLinePacked CmdLine_load(const thread Cmd &s) {
+    CmdLinePacked r;
+    r.tag = s.tag;
+    r.start = *((const thread float2 *)((const thread char *)&s + 8));
+    r.end = *((const thread float2 *)((const thread char *)&s + 16));
+    return r;
+}
 #define Cmd_Fill 4
+CmdFillPacked CmdFill_load(const thread Cmd &s) {
+    CmdFillPacked r;
+    r.tag = s.tag;
+    r.start = *((const thread float2 *)((const thread char *)&s + 8));
+    r.end = *((const thread float2 *)((const thread char *)&s + 16));
+    return r;
+}
 #define Cmd_Stroke 5
+CmdStrokePacked CmdStroke_load(const thread Cmd &s) {
+    CmdStrokePacked r;
+    r.tag = s.tag;
+    r.halfWidth = *((const thread float *)((const thread char *)&s + 4));
+    r.rgba_color = *((const thread uint *)((const thread char *)&s + 8));
+    return r;
+}
 #define Cmd_FillEdge 6
+CmdFillEdgePacked CmdFillEdge_load(const thread Cmd &s) {
+    CmdFillEdgePacked r;
+    r.tag = s.tag;
+    r.sign = *((const thread int *)((const thread char *)&s + 4));
+    r.y = *((const thread float *)((const thread char *)&s + 8));
+    return r;
+}
 #define Cmd_DrawFill 7
+CmdDrawFillPacked CmdDrawFill_load(const thread Cmd &s) {
+    CmdDrawFillPacked r;
+    r.tag = s.tag;
+    r.backdrop = *((const thread int *)((const thread char *)&s + 4));
+    r.rgba_color = *((const thread uint *)((const thread char *)&s + 8));
+    return r;
+}
 #define Cmd_Solid 8
+CmdSolidPacked CmdSolid_load(const thread Cmd &s) {
+    CmdSolidPacked r;
+    r.tag = s.tag;
+    r.rgba_color = *((const thread uint *)((const thread char *)&s + 4));
+    return r;
+}
 #define Cmd_Bail 9
 
 void CmdCircle_write(device char *buf, CmdCircleRef ref, CmdCirclePacked s) {

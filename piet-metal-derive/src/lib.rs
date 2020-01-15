@@ -354,6 +354,21 @@ impl GpuTypeDef {
                 let body_size = ((size + 3) >> 2) - 1;
                 write!(r, "    uint body[{}];\n", body_size).unwrap();
                 write!(r, "}};\n").unwrap();
+                // Read of entire structure
+                write!(
+                    r,
+                    "{} {}_read(const device char *buf, {} ref) {{\n",
+                    en.name, en.name, rn
+                )
+                .unwrap();
+                write!(
+                    r,
+                    "    return *((const device {} *)(buf + ref));\n",
+                    en.name
+                )
+                .unwrap();
+                write!(r, "}}\n").unwrap();
+                // Read of just the tag
                 write!(
                     r,
                     "uint {}_tag(const device char *buf, {} ref) {{\n",
@@ -369,13 +384,46 @@ impl GpuTypeDef {
                 write!(r, "}}\n").unwrap();
                 // TODO: current code base is 1-based, but we could switch to 0
                 let mut tag = 1;
-                for (name, _fields) in &en.variants {
+                for (name, fields) in &en.variants {
                     write!(r, "#define {}_{} {}\n", en.name, name, tag).unwrap();
                     tag += 1;
+
+                    if !fields.is_empty() {
+                        if let GpuType::InlineStruct(s) = &fields[0] {
+                            let s = module.resolve_by_name(&s).unwrap();
+                            s.to_metal_load_enum(&en.name, module, &mut r);
+                        }
+                    }
                 }
             }
         }
         r
+    }
+
+    fn to_metal_load_enum(&self, enum_name: &str, module: &GpuModule, r: &mut String) {
+        match self {
+            GpuTypeDef::Struct(name, fields) => {
+                write!(
+                    r,
+                    "{}Packed {}_load(const thread {} &s) {{\n",
+                    name, name, enum_name
+                )
+                .unwrap();
+                write!(r, "    {}Packed r;\n", name).unwrap();
+                write!(r, "    r.tag = s.tag;\n").unwrap();
+                let mut offset = 4;
+                for (fieldname, ty) in fields {
+                    offset += align_padding(offset, ty.alignment(module));
+                    let mty = ty.metal_typename();
+                    // maybe better to load from `body` array rather than pointer foo
+                    write!(r, "    r.{} = *((const thread {} *)((const thread char *)&s + {}));\n", fieldname, mty, offset).unwrap();
+                    offset += ty.size(module);
+                }
+                write!(r, "    return r;\n").unwrap();
+                write!(r, "}}\n").unwrap();
+            }
+            _ => panic!("internal inconsistency"),
+        }
     }
 
     fn to_metal_wr(&self, _module: &GpuModule) -> String {
@@ -397,7 +445,7 @@ impl GpuTypeDef {
                 .unwrap();
                 write!(r, "}}\n").unwrap();
             }
-            // We don't write enum structs, we only write their variants.
+            // We don't write individual enum structs, we only write their variants.
             GpuTypeDef::Enum(en) => {
                 if en.variants.iter().any(|(_name, fields)| fields.is_empty()) {
                     write!(
