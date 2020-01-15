@@ -153,3 +153,143 @@ uint PietItem_tag(const device char *buf, PietItemRef ref) {
 #define PietItem_Fill 3
 #define PietItem_Poly 4
 
+typedef uint CmdCircleRef;
+typedef uint CmdLineRef;
+typedef uint CmdStrokeRef;
+typedef uint CmdFillRef;
+typedef uint CmdFillEdgeRef;
+typedef uint CmdDrawFillRef;
+typedef uint CmdSolidRef;
+typedef uint CmdRef;
+struct CmdCirclePacked {
+    uint tag;
+    ushort4 bbox;
+};
+CmdCirclePacked CmdCircle_read(const device char *buf, CmdCircleRef ref) {
+    return *((const device CmdCirclePacked *)(buf + ref));
+}
+ushort4 CmdCircle_bbox(const device char *buf, CmdCircleRef ref) {
+    return ((const device CmdCirclePacked *)(buf + ref))->bbox;
+}
+struct CmdLinePacked {
+    uint tag;
+    float2 start;
+    float2 end;
+};
+CmdLinePacked CmdLine_read(const device char *buf, CmdLineRef ref) {
+    return *((const device CmdLinePacked *)(buf + ref));
+}
+float2 CmdLine_start(const device char *buf, CmdLineRef ref) {
+    return ((const device CmdLinePacked *)(buf + ref))->start;
+}
+float2 CmdLine_end(const device char *buf, CmdLineRef ref) {
+    return ((const device CmdLinePacked *)(buf + ref))->end;
+}
+struct CmdStrokePacked {
+    uint tag;
+    float halfWidth;
+    uint rgba_color;
+};
+CmdStrokePacked CmdStroke_read(const device char *buf, CmdStrokeRef ref) {
+    return *((const device CmdStrokePacked *)(buf + ref));
+}
+float CmdStroke_halfWidth(const device char *buf, CmdStrokeRef ref) {
+    return ((const device CmdStrokePacked *)(buf + ref))->halfWidth;
+}
+uint CmdStroke_rgba_color(const device char *buf, CmdStrokeRef ref) {
+    return ((const device CmdStrokePacked *)(buf + ref))->rgba_color;
+}
+struct CmdFillPacked {
+    uint tag;
+    float2 start;
+    float2 end;
+};
+CmdFillPacked CmdFill_read(const device char *buf, CmdFillRef ref) {
+    return *((const device CmdFillPacked *)(buf + ref));
+}
+float2 CmdFill_start(const device char *buf, CmdFillRef ref) {
+    return ((const device CmdFillPacked *)(buf + ref))->start;
+}
+float2 CmdFill_end(const device char *buf, CmdFillRef ref) {
+    return ((const device CmdFillPacked *)(buf + ref))->end;
+}
+struct CmdFillEdgePacked {
+    uint tag;
+    int sign;
+    float y;
+};
+CmdFillEdgePacked CmdFillEdge_read(const device char *buf, CmdFillEdgeRef ref) {
+    return *((const device CmdFillEdgePacked *)(buf + ref));
+}
+int CmdFillEdge_sign(const device char *buf, CmdFillEdgeRef ref) {
+    return ((const device CmdFillEdgePacked *)(buf + ref))->sign;
+}
+float CmdFillEdge_y(const device char *buf, CmdFillEdgeRef ref) {
+    return ((const device CmdFillEdgePacked *)(buf + ref))->y;
+}
+struct CmdDrawFillPacked {
+    uint tag;
+    int backdrop;
+    uint rgba_color;
+};
+CmdDrawFillPacked CmdDrawFill_read(const device char *buf, CmdDrawFillRef ref) {
+    return *((const device CmdDrawFillPacked *)(buf + ref));
+}
+int CmdDrawFill_backdrop(const device char *buf, CmdDrawFillRef ref) {
+    return ((const device CmdDrawFillPacked *)(buf + ref))->backdrop;
+}
+uint CmdDrawFill_rgba_color(const device char *buf, CmdDrawFillRef ref) {
+    return ((const device CmdDrawFillPacked *)(buf + ref))->rgba_color;
+}
+struct CmdSolidPacked {
+    uint tag;
+    uint rgba_color;
+};
+CmdSolidPacked CmdSolid_read(const device char *buf, CmdSolidRef ref) {
+    return *((const device CmdSolidPacked *)(buf + ref));
+}
+uint CmdSolid_rgba_color(const device char *buf, CmdSolidRef ref) {
+    return ((const device CmdSolidPacked *)(buf + ref))->rgba_color;
+}
+struct Cmd {
+    uint tag;
+    uint body[5];
+};
+uint Cmd_tag(const device char *buf, CmdRef ref) {
+    return ((const device Cmd *)(buf + ref))->tag;
+}
+#define Cmd_End 1
+#define Cmd_Circle 2
+#define Cmd_Line 3
+#define Cmd_Fill 4
+#define Cmd_Stroke 5
+#define Cmd_FillEdge 6
+#define Cmd_DrawFill 7
+#define Cmd_Solid 8
+#define Cmd_Bail 9
+
+void CmdCircle_write(device char *buf, CmdCircleRef ref, CmdCirclePacked s) {
+    *((device CmdCirclePacked *)(buf + ref)) = s;
+}
+void CmdLine_write(device char *buf, CmdLineRef ref, CmdLinePacked s) {
+    *((device CmdLinePacked *)(buf + ref)) = s;
+}
+void CmdStroke_write(device char *buf, CmdStrokeRef ref, CmdStrokePacked s) {
+    *((device CmdStrokePacked *)(buf + ref)) = s;
+}
+void CmdFill_write(device char *buf, CmdFillRef ref, CmdFillPacked s) {
+    *((device CmdFillPacked *)(buf + ref)) = s;
+}
+void CmdFillEdge_write(device char *buf, CmdFillEdgeRef ref, CmdFillEdgePacked s) {
+    *((device CmdFillEdgePacked *)(buf + ref)) = s;
+}
+void CmdDrawFill_write(device char *buf, CmdDrawFillRef ref, CmdDrawFillPacked s) {
+    *((device CmdDrawFillPacked *)(buf + ref)) = s;
+}
+void CmdSolid_write(device char *buf, CmdSolidRef ref, CmdSolidPacked s) {
+    *((device CmdSolidPacked *)(buf + ref)) = s;
+}
+void Cmd_write_tag(device char *buf, CmdRef ref, uint tag) {
+    ((device Cmd *)(buf + ref))->tag = tag;
+}
+

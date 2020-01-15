@@ -398,7 +398,24 @@ impl GpuTypeDef {
                 write!(r, "}}\n").unwrap();
             }
             // We don't write enum structs, we only write their variants.
-            _ => (),
+            GpuTypeDef::Enum(en) => {
+                if en.variants.iter().any(|(_name, fields)| fields.is_empty()) {
+                    write!(
+                        r, 
+                        "void {}_write_tag(device char *buf, CmdRef ref, uint tag) {{\n",
+                        en.name
+                    )
+                    .unwrap();
+                    write!(
+                        r,
+                        "    ((device {} *)(buf + ref))->tag = tag;\n",
+                        en.name
+                    )
+                    .unwrap();
+                    write!(r, "}}\n").unwrap();
+                }
+
+            }
         }
         r
     }

@@ -85,6 +85,7 @@ piet_metal! {
             Fill(CmdFill),
             Stroke(CmdStroke),
             FillEdge(CmdFillEdge),
+            DrawFill(CmdDrawFill),
             Solid(CmdSolid),
             Bail,
         }
