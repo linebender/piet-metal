@@ -30,6 +30,7 @@ enum GpuScalar {
     U32,
 }
 
+#[derive(Clone)]
 enum GpuType {
     Scalar(GpuScalar),
     Vector(GpuScalar, usize),
@@ -68,6 +69,16 @@ impl GpuScalar {
         }
     }
 
+    fn hlsl_typename(self) -> &'static str {
+        match self {
+            GpuScalar::F32 => "float",
+            GpuScalar::I32 => "int",
+            GpuScalar::U32 => "uint",
+            // everything else is stored in a uint (ignoring F64 for now)
+            _ => "uint",
+        }
+    }
+
     fn size(self) -> usize {
         match self {
             GpuScalar::F32 => 4,
@@ -94,11 +105,265 @@ impl GpuScalar {
     }
 }
 
+impl std::fmt::Display for GpuScalar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GpuScalar::F32 => write!(f, "F32"),
+            GpuScalar::I8 => write!(f, "I8"),
+            GpuScalar::I16 => write!(f, "I16"),
+            GpuScalar::I32 => write!(f, "I32"),
+            GpuScalar::U8 => write!(f, "U8"),
+            GpuScalar::U16 => write!(f, "U16"),
+            GpuScalar::U32 => write!(f, "U32"),
+        }
+    }
+}
+
+// HLSL decoder generation helper function
+fn hlsl_get_ref_plus_offset(current_offset: usize) -> String {
+    match current_offset {
+        0 => String::from("ref"),
+        _ => format!("ref + {}", current_offset),
+    }
+}
+
+// HLSL decoder generation helper function
+fn hlsl_calculate_num_uints_required_for_storage(ty: &GpuScalar, num_elements: usize) -> usize {
+    let num_scalars_in_a_uint: usize = match ty {
+        GpuScalar::I8 | GpuScalar::U8 => 4,
+        GpuScalar::I16 | GpuScalar::U16 => 2,
+        _ => 1,
+    };
+
+    (num_elements + num_scalars_in_a_uint - 1) / num_scalars_in_a_uint
+}
+
+fn hlsl_generate_value_extractor(value_bit_size: u32) -> String {
+    if value_bit_size > 31 {
+        panic!("nonsensical to generate an extractor for a value with bit size greater than 31");
+    }
+    let mut extractor: String = String::new();
+
+    let mask_width: usize = 2_usize.pow(value_bit_size) - 1;
+
+    write!(
+        extractor,
+        "inline uint extract_{}bit_value(uint bit_shift, uint package) {{\n",
+        value_bit_size
+    )
+    .unwrap();
+    write!(extractor, "    uint mask = {} << bit_shift;\n", mask_width).unwrap();
+    write!(
+        extractor,
+        "{}",
+        "    uint result = (package >> bit_shift) & mask;\n\n    return result;\n}\n\n"
+    )
+    .unwrap();
+
+    extractor
+}
+
+// HLSL decoder generation helper function
+fn hlsl_generate_readers_accessors_and_unpackers(
+    name: &String,
+    package_fields: &Vec<(String, GpuType, Option<Vec<(String, GpuType, usize)>>)>,
+    module: &GpuModule,
+) -> String {
+    let mut structure_decoder = String::new();
+    let mut field_accessors: Vec<String> = Vec::new();
+    let mut unpackers: Vec<String> = Vec::new();
+
+    let ref_name = format!("{}Ref", name);
+
+    write!(
+        structure_decoder,
+        "inline {}Packed {}_read(ByteAddressBuffer buf, {} ref) {{\n",
+        name, name, ref_name,
+    )
+    .unwrap();
+    write!(structure_decoder, "    {}Packed result;\n\n", name,).unwrap();
+
+    let mut current_offset: usize = 0;
+    if module.enum_variants.contains(name) {
+        // account for tag
+        current_offset = 4;
+    }
+
+    for (package_fieldname, package_type, packed_offsets_and_types) in package_fields {
+        let tn: String = package_type.hlsl_typename();
+        let loader = match package_type {
+            GpuType::Scalar(_) => format!(
+                "    {} {} = buf.Load({});\n",
+                tn,
+                package_fieldname,
+                hlsl_get_ref_plus_offset(current_offset),
+            ),
+            GpuType::Vector(scalar, size) => format!(
+                "    {}{} {} = buf.Load{}({});\n",
+                scalar.hlsl_typename(),
+                size,
+                package_fieldname,
+                size,
+                hlsl_get_ref_plus_offset(current_offset)
+            ),
+            GpuType::InlineStruct(isn) => format!(
+                "    {} {} = {}_read({});\n",
+                isn,
+                package_fieldname,
+                isn,
+                hlsl_get_ref_plus_offset(current_offset)
+            ),
+            GpuType::Ref(_) => unimplemented!(),
+        };
+
+        if package_type.is_small() {
+            let mut field_accessor = String::new();
+
+            write!(
+                field_accessor,
+                "inline {} {}_{}(ByteAddressBuffer buf, {} ref) {{\n",
+                tn, name, package_fieldname, ref_name,
+            )
+            .unwrap();
+            write!(field_accessor, "{}", loader).unwrap();
+            write!(field_accessor, "    return {};\n}}\n\n", package_fieldname).unwrap();
+            field_accessors.push(field_accessor.clone());
+
+            let mut unpacker = String::new();
+
+            if let Some(ptos) = packed_offsets_and_types {
+                for (unpacked_fieldname, unpacked_type, offset_in_package) in ptos {
+                    match unpacked_type {
+                        GpuType::Scalar(scalar) => {
+                            let size_in_bits = 8 * scalar.size();
+                            let hlsl_type: String = match scalar {
+                                GpuScalar::U8 | GpuScalar::U16 => String::from("uint"),
+                                GpuScalar::I8 | GpuScalar::I16 => String::from("int"),
+                                _ => panic!("unexpected unpacking of 32 bit value!"),
+                            };
+
+                            write!(
+                                unpacker,
+                                "inline uint {}_unpack_{}(uint {}) {{\n    {} result;\n\n",
+                                name, unpacked_fieldname, package_fieldname, hlsl_type,
+                            )
+                            .unwrap();
+
+                            write!(
+                                unpacker,
+                                "    result = extract_{}bit_value({}, {});\n",
+                                size_in_bits, offset_in_package, package_fieldname
+                            )
+                            .unwrap();
+                        }
+                        GpuType::Vector(scalar, unpacked_size) => {
+                            let scalar_size_in_bits = 8 * scalar.size();
+                            let hlsl_type: String = match scalar {
+                                GpuScalar::U8 | GpuScalar::U16 => String::from("uint"),
+                                GpuScalar::I8 | GpuScalar::I16 => String::from("int"),
+                                _ => panic!("unexpected unpacking of 32 bit value!"),
+                            };
+
+                            let num_uints_required_for_storage =
+                                hlsl_calculate_num_uints_required_for_storage(
+                                    &scalar,
+                                    *unpacked_size,
+                                );
+                            write!(
+                                unpacker,
+                                "uint{} {}_unpack_{}(uint{} {}) {{\n    {}{} result;\n\n",
+                                unpacked_size,
+                                name,
+                                unpacked_fieldname,
+                                num_uints_required_for_storage,
+                                package_fieldname,
+                                hlsl_type,
+                                num_uints_required_for_storage,
+                            )
+                            .unwrap();
+
+                            for i in 0..*unpacked_size {
+                                write!(
+                                    unpacker,
+                                    "    result[{}] = extract_{}bit_value({}, {});\n",
+                                    i,
+                                    scalar_size_in_bits,
+                                    32 - (i + 1) * scalar_size_in_bits,
+                                    package_fieldname
+                                )
+                                .unwrap();
+                            }
+                        }
+                        _ => panic!("only expected small types"),
+                    }
+                    write!(unpacker, "    return result;\n").unwrap();
+                    write!(unpacker, "}}\n\n").unwrap();
+                }
+            }
+            unpackers.push(unpacker.clone());
+        }
+
+        write!(structure_decoder, "{}", loader).unwrap();
+        write!(
+            structure_decoder,
+            "    result.{} = {};\n\n",
+            package_fieldname, package_fieldname
+        )
+        .unwrap();
+
+        current_offset += package_type.size(module);
+    }
+
+    write!(structure_decoder, "    return result;\n}}\n\n",).unwrap();
+
+    for field_accessor in field_accessors {
+        write!(structure_decoder, "{}", field_accessor).unwrap();
+    }
+
+    for unpacker in unpackers {
+        write!(structure_decoder, "{}", unpacker).unwrap();
+    }
+
+    structure_decoder
+}
+
 impl GpuType {
     fn metal_typename(&self) -> String {
         match self {
             GpuType::Scalar(scalar) => scalar.metal_typename().into(),
             GpuType::Vector(scalar, size) => format!("{}{}", scalar.metal_typename(), size),
+            GpuType::InlineStruct(name) => format!("{}Packed", name),
+            // TODO: probably want to have more friendly names for simple struct refs.
+            GpuType::Ref(inner) => {
+                if let GpuType::InlineStruct(name) = inner.deref() {
+                    format!("{}Ref", name)
+                } else {
+                    "uint".into()
+                }
+            }
+        }
+    }
+
+    fn hlsl_typename(&self) -> String {
+        match self {
+            GpuType::Scalar(scalar) => scalar.hlsl_typename().into(),
+            GpuType::Vector(scalar, size) => {
+                match scalar {
+                    GpuScalar::F32 | GpuScalar::I32 | GpuScalar::U32 => {
+                        format!("{}{}", scalar.hlsl_typename(), size)
+                    }
+                    _ => {
+                        let num_uints_required_for_storage =
+                            hlsl_calculate_num_uints_required_for_storage(scalar, *size);
+                        //TODO: where should sanity checks for size be done?
+                        if num_uints_required_for_storage == 1 {
+                            String::from("uint")
+                        } else {
+                            format!("uint{}", num_uints_required_for_storage)
+                        }
+                    }
+                }
+            }
             GpuType::InlineStruct(name) => format!("{}Packed", name),
             // TODO: probably want to have more friendly names for simple struct refs.
             GpuType::Ref(inner) => {
@@ -197,8 +462,8 @@ impl GpuTypeDef {
                 let mut fields = Vec::new();
                 for field in named {
                     let field_ty = GpuType::from_syn(&field.ty)?;
-                    let field_name = field.ident.as_ref().ok_or("need name".to_string())?;
-                    fields.push((field_name.to_string(), field_ty));
+                    let fieldname = field.ident.as_ref().ok_or("need name".to_string())?;
+                    fields.push((fieldname.to_string(), field_ty));
                 }
                 Ok(GpuTypeDef::Struct(ident.to_string(), fields))
             }
@@ -377,6 +642,330 @@ impl GpuTypeDef {
         }
         r
     }
+
+    fn to_hlsl(&self, module: &GpuModule) -> String {
+        let mut r = String::new();
+        match self {
+            GpuTypeDef::Struct(name, fields) => {
+                // The packed struct definition (is missing variable sized arrays)
+                write!(r, "struct {}Packed {{\n", name).unwrap();
+                if module.enum_variants.contains(name) {
+                    write!(r, "    uint tag;\n").unwrap();
+                }
+                let mut package_fields: Vec<(
+                    String,
+                    GpuType,
+                    Option<Vec<(String, GpuType, usize)>>,
+                )> = Vec::new();
+                let mut package_fieldname: String = String::new();
+                let mut package_fieldsize: usize = 0;
+                let mut package_field_begun = false;
+                let mut package_field_name_type_offsets: Vec<(String, GpuType, usize)> = Vec::new();
+                for (fieldname, ty) in fields {
+                    if package_field_begun {
+                        match ty {
+                            GpuType::Scalar(scalar) => match scalar {
+                                GpuScalar::F32 | GpuScalar::I32 | GpuScalar::U32 => {
+                                    write!(r, "    uint {};\n", package_fieldname).unwrap();
+                                    package_fields.push((
+                                        package_fieldname.clone(),
+                                        GpuType::Scalar(GpuScalar::U32),
+                                        Some(package_field_name_type_offsets.clone()),
+                                    ));
+
+                                    package_fieldname = String::new();
+                                    package_fieldsize = 0;
+                                    package_field_begun = false;
+
+                                    write!(r, "    {} {};\n", scalar.hlsl_typename(), fieldname)
+                                        .unwrap();
+                                    package_fields.push((fieldname.clone(), ty.clone(), None));
+                                }
+                                _ => {
+                                    if scalar.size() + package_fieldsize > 4 {
+                                        write!(r, "    uint {};\n", package_fieldname).unwrap();
+                                        package_fields.push((
+                                            package_fieldname.clone(),
+                                            GpuType::Scalar(GpuScalar::U32),
+                                            Some(package_field_name_type_offsets.clone()),
+                                        ));
+
+                                        package_fieldname = fieldname.clone();
+                                        package_fieldsize = scalar.size();
+
+                                        package_field_name_type_offsets = vec![(
+                                            fieldname.clone(),
+                                            ty.clone(),
+                                            32 - package_fieldsize * 8,
+                                        )];
+                                    } else {
+                                        package_fieldname =
+                                            format!("{}_{}", package_fieldname, fieldname);
+                                        package_fieldsize += scalar.size();
+                                        package_field_name_type_offsets.push((
+                                            fieldname.clone(),
+                                            ty.clone(),
+                                            32 - package_fieldsize * 8,
+                                        ));
+                                    }
+                                }
+                            },
+                            GpuType::Vector(scalar, size) => match scalar {
+                                GpuScalar::F32 | GpuScalar::I32 | GpuScalar::U32 => {
+                                    write!(r, "    uint {};\n", package_fieldname).unwrap();
+                                    package_fields.push((
+                                        package_fieldname.clone(),
+                                        GpuType::Scalar(GpuScalar::U32),
+                                        Some(package_field_name_type_offsets.clone()),
+                                    ));
+
+                                    package_fieldname = String::new();
+                                    package_fieldsize = 0;
+                                    package_field_name_type_offsets = Vec::new();
+                                    package_field_begun = false;
+
+                                    write!(
+                                        r,
+                                        "    {}{} {};\n",
+                                        scalar.hlsl_typename(),
+                                        size,
+                                        fieldname
+                                    )
+                                    .unwrap();
+                                    package_fields.push((
+                                        fieldname.clone(),
+                                        GpuType::Vector(scalar.clone(), *size),
+                                        None,
+                                    ));
+                                }
+                                _ => {
+                                    let vector_size = scalar.size() * size;
+                                    if !(vector_size < 4) {
+                                        write!(r, "    uint {};\n", package_fieldname).unwrap();
+                                        package_fields.push((
+                                            package_fieldname.clone(),
+                                            GpuType::Scalar(GpuScalar::U32),
+                                            Some(package_field_name_type_offsets.clone()),
+                                        ));
+
+                                        package_fieldname = String::new();
+                                        package_fieldsize = 0;
+                                        package_field_name_type_offsets = Vec::new();
+                                        package_field_begun = false;
+
+                                        let num_required_uints =
+                                            hlsl_calculate_num_uints_required_for_storage(
+                                                scalar, *size,
+                                            );
+
+                                        write!(
+                                            r,
+                                            "    uint{} {};\n",
+                                            num_required_uints, fieldname
+                                        )
+                                        .unwrap();
+                                        package_fields.push((
+                                            fieldname.clone(),
+                                            GpuType::Vector(GpuScalar::U32, num_required_uints),
+                                            Some(vec![(fieldname.clone(), ty.clone(), 0)]),
+                                        ));
+                                    } else {
+                                        package_fieldname =
+                                            format!("{}_{}", package_fieldname, fieldname);
+                                        package_fieldsize += scalar.size() * size;
+                                        package_field_name_type_offsets.push((
+                                            fieldname.clone(),
+                                            ty.clone(),
+                                            32 - package_fieldsize * 8,
+                                        ));
+                                    }
+                                }
+                            },
+                            GpuType::InlineStruct(name) => {
+                                let size = ty.size(module);
+                                if package_fieldsize + size > 4 {
+                                    write!(r, "    uint {};\n", package_fieldname).unwrap();
+                                    package_fields.push((
+                                        package_fieldname.clone(),
+                                        GpuType::Scalar(GpuScalar::U32),
+                                        Some(package_field_name_type_offsets.clone()),
+                                    ));
+
+                                    package_fieldname = String::new();
+                                    package_fieldsize = 0;
+                                    package_field_name_type_offsets = Vec::new();
+                                    package_field_begun = false;
+
+                                    write!(r, "    {}Packed {};\n", name, fieldname).unwrap();
+                                    package_fields.push((fieldname.clone(), ty.clone(), None));
+                                } else {
+                                    package_fieldname = format!("{}_{}", package_fieldname, name);
+                                    package_fieldsize += size;
+                                    package_field_name_type_offsets.push((
+                                        fieldname.clone(),
+                                        ty.clone(),
+                                        32 - package_fieldsize * 8,
+                                    ));
+                                }
+                            }
+                            GpuType::Ref(inner) => {
+                                write!(r, "    uint {};\n", package_fieldname).unwrap();
+                                package_fields.push((
+                                    package_fieldname.clone(),
+                                    GpuType::Scalar(GpuScalar::U32),
+                                    Some(package_field_name_type_offsets.clone()),
+                                ));
+
+                                package_fieldname = String::new();
+                                package_fieldsize = 0;
+                                package_field_name_type_offsets = Vec::new();
+                                package_field_begun = false;
+
+                                if let GpuType::InlineStruct(name) = inner.deref() {
+                                    write!(r, "    {}Ref {};\n", name, fieldname).unwrap();
+                                    package_fields.push((fieldname.clone(), ty.clone(), None));
+                                } else {
+                                    write!(r, "    uint {};\n", fieldname).unwrap();
+                                    package_fields.push((fieldname.clone(), ty.clone(), None));
+                                }
+                            }
+                        }
+                    } else {
+                        // not already building a combined field
+                        match ty {
+                            GpuType::Scalar(scalar) => match scalar {
+                                GpuScalar::F32 | GpuScalar::I32 | GpuScalar::U32 => {
+                                    write!(r, "    {} {};\n", scalar.hlsl_typename(), fieldname)
+                                        .unwrap();
+                                    package_fields.push((fieldname.clone(), ty.clone(), None));
+                                }
+                                _ => {
+                                    package_field_begun = true;
+                                    package_fieldname = fieldname.clone();
+                                    package_fieldsize += scalar.size();
+                                    package_field_name_type_offsets.push((
+                                        fieldname.clone(),
+                                        ty.clone(),
+                                        32 - package_fieldsize * 8,
+                                    ));
+                                }
+                            },
+                            GpuType::Vector(scalar, size) => match scalar {
+                                GpuScalar::F32 | GpuScalar::I32 | GpuScalar::U32 => {
+                                    write!(
+                                        r,
+                                        "    {}{} {};\n",
+                                        scalar.hlsl_typename(),
+                                        size,
+                                        fieldname
+                                    )
+                                    .unwrap();
+                                    package_fields.push((fieldname.clone(), ty.clone(), None));
+                                }
+                                _ => {
+                                    let vector_size = scalar.size() * size;
+                                    let num_uints_required_for_storage =
+                                        hlsl_calculate_num_uints_required_for_storage(
+                                            scalar, *size,
+                                        );
+                                    if !(vector_size < 4) {
+                                        write!(
+                                            r,
+                                            "    uint{} {};\n",
+                                            num_uints_required_for_storage, fieldname
+                                        )
+                                        .unwrap();
+                                        package_fields.push((
+                                            fieldname.clone(),
+                                            GpuType::Vector(
+                                                GpuScalar::U32,
+                                                num_uints_required_for_storage,
+                                            ),
+                                            None,
+                                        ));
+                                    } else {
+                                        package_field_begun = true;
+                                        package_fieldname = fieldname.clone();
+                                        package_fieldsize = vector_size;
+                                        package_field_name_type_offsets.push((
+                                            fieldname.clone(),
+                                            ty.clone(),
+                                            32 - package_fieldsize * 8,
+                                        ));
+                                    }
+                                }
+                            },
+                            GpuType::InlineStruct(name) => {
+                                let size = ty.size(module);
+                                if size > 4 {
+                                    write!(r, "    {}Packed {};\n", name, fieldname).unwrap();
+                                    package_fields.push((fieldname.clone(), ty.clone(), None));
+                                } else {
+                                    package_field_begun = true;
+                                    package_fieldname = name.clone();
+                                    package_fieldsize += size;
+                                    package_field_name_type_offsets.push((
+                                        fieldname.clone(),
+                                        ty.clone(),
+                                        32 - 8 * package_fieldsize,
+                                    ));
+                                }
+                            }
+                            GpuType::Ref(inner) => {
+                                if let GpuType::InlineStruct(name) = inner.deref() {
+                                    write!(r, "    {}Ref {};\n", name, fieldname).unwrap();
+                                    package_fields.push((fieldname.clone(), ty.clone(), None));
+                                } else {
+                                    write!(r, "    uint {};\n", fieldname).unwrap();
+                                    package_fields.push((fieldname.clone(), ty.clone(), None));
+                                }
+                            }
+                        }
+                    }
+                }
+                if package_field_begun {
+                    write!(r, "    uint {};\n", package_fieldname).unwrap();
+                    package_fields.push((
+                        package_fieldname.clone(),
+                        GpuType::Scalar(GpuScalar::U32),
+                        Some(package_field_name_type_offsets.clone()),
+                    ));
+                }
+                write!(r, "}};\n\n").unwrap();
+                // Read of packed structure from a ByteAddressBuffer
+                write!(
+                    r,
+                    "{}",
+                    hlsl_generate_readers_accessors_and_unpackers(name, &package_fields, module)
+                )
+                .unwrap();
+            }
+            GpuTypeDef::Enum(en) => {
+                let rn = format!("{}Ref", en.name);
+                write!(r, "struct {} {{\n", en.name).unwrap();
+                write!(r, "    uint tag;\n").unwrap();
+                let size = self.size(module);
+                // TODO: this predicts incorrect number of u32s needed to store body (differences with metal alignment)
+                let body_size = ((size + 3) >> 2) - 1;
+                write!(r, "    uint body[{}];\n", body_size).unwrap();
+                write!(r, "}};\n").unwrap();
+                write!(
+                    r,
+                    "uint {}_tag(ByteAddressBuffer buf, {} ref) {{\n",
+                    en.name, rn
+                )
+                .unwrap();
+                write!(r, "    uint result = buf.Load(ref);\n    return result;\n").unwrap();
+                write!(r, "}}\n\n").unwrap();
+                let mut tag = 0;
+                for (name, _fields) in &en.variants {
+                    write!(r, "#define {}_{} {}\n", en.name, name, tag).unwrap();
+                    tag += 1;
+                }
+            }
+        }
+        r
+    }
 }
 
 impl GpuModule {
@@ -414,6 +1003,20 @@ impl GpuModule {
         }
         for def in &self.defs {
             r.push_str(&def.to_metal(self));
+        }
+        r
+    }
+
+    fn to_hlsl(&self) -> String {
+        let mut r = String::new();
+        write!(&mut r, "{}", hlsl_generate_value_extractor(8)).unwrap();
+        write!(&mut r, "{}", hlsl_generate_value_extractor(16)).unwrap();
+        for def in &self.defs {
+            write!(&mut r, "typedef uint {}Ref;\n", def.name()).unwrap();
+        }
+        write!(&mut r, "\n").unwrap();
+        for def in &self.defs {
+            r.push_str(&def.to_hlsl(self));
         }
         r
     }
@@ -495,12 +1098,17 @@ fn derive_proc_metal_impl(input: syn::DeriveInput) -> Result<proc_macro2::TokenS
     Ok(expanded)
 }
 
-impl Parse for Items {
-    fn parse(input: ParseStream) -> Result<Self, syn::Error> {
-        let mut items = Vec::new();
-        while !input.is_empty() {
-            items.push(input.parse()?)
+#[proc_macro]
+pub fn piet_hlsl(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as syn::ItemMod);
+    //println!("input: {:#?}", input);
+    let module = GpuModule::from_syn(&input).unwrap();
+    let gen_hlsl_fn = format_ident!("gen_hlsl_{}", input.ident);
+    let result = module.to_hlsl();
+    let expanded = quote! {
+        fn #gen_hlsl_fn() {
+            println!("{}", #result);
         }
-        Ok(Items(items))
-    }
+    };
+    expanded.into()
 }
