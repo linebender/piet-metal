@@ -629,7 +629,7 @@ impl GpuTypeDef {
                 write!(r, "}};\n").unwrap();
                 write!(
                     r,
-                    "inline uint {}_tag(const device char *buf, {} ref) {{\n",
+                    "uint {}_tag(const device char *buf, {} ref) {{\n",
                     en.name, rn
                 )
                     .unwrap();
@@ -959,7 +959,7 @@ impl GpuTypeDef {
                 write!(r, "}};\n").unwrap();
                 write!(
                     r,
-                    "uint {}_tag(ByteAddressBuffer buf, {} ref) {{\n",
+                    "inline uint {}_tag(ByteAddressBuffer buf, {} ref) {{\n",
                     en.name, rn
                 )
                     .unwrap();
@@ -1114,8 +1114,8 @@ pub fn piet_hlsl(input: TokenStream) -> TokenStream {
     let gen_hlsl_fn = format_ident!("gen_hlsl_{}", input.ident);
     let result = module.to_hlsl();
     let expanded = quote! {
-        fn #gen_hlsl_fn() {
-            println!("{}", #result);
+        fn #gen_hlsl_fn() -> String{
+            String::from(#result)
         }
     };
     expanded.into()
