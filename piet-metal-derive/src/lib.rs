@@ -286,7 +286,7 @@ fn hlsl_generate_readers_accessors_and_unpackers(
                                 num_uints_required_for_storage,
                                 package_fieldname,
                                 hlsl_type,
-                                num_uints_required_for_storage,
+                                unpacked_size,
                             )
                                 .unwrap();
 
