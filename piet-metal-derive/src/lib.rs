@@ -1112,3 +1112,13 @@ pub fn piet_hlsl(input: TokenStream) -> TokenStream {
     };
     expanded.into()
 }
+
+impl Parse for Items {
+    fn parse(input: ParseStream) -> Result<Self, syn::Error> {
+        let mut items = Vec::new();
+        while !input.is_empty() {
+            items.push(input.parse()?)
+        }
+        Ok(Items(items))
+    }
+}
