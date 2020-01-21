@@ -279,7 +279,7 @@ fn hlsl_generate_readers_accessors_and_unpackers(
                                 );
                             write!(
                                 unpacker,
-                                "uint{} {}_unpack_{}(uint{} {}) {{\n    {}{} result;\n\n",
+                                "inline uint{} {}_unpack_{}(uint{} {}) {{\n    {}{} result;\n\n",
                                 unpacked_size,
                                 name,
                                 unpacked_fieldname,
@@ -629,7 +629,7 @@ impl GpuTypeDef {
                 write!(r, "}};\n").unwrap();
                 write!(
                     r,
-                    "uint {}_tag(const device char *buf, {} ref) {{\n",
+                    "inline uint {}_tag(const device char *buf, {} ref) {{\n",
                     en.name, rn
                 )
                     .unwrap();
