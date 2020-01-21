@@ -119,7 +119,7 @@ impl std::fmt::Display for GpuScalar {
     }
 }
 
-// HLSL decoder generation helper function
+// HLSL helpers
 fn hlsl_get_ref_plus_offset(current_offset: usize) -> String {
     match current_offset {
         0 => String::from("ref"),
@@ -127,7 +127,6 @@ fn hlsl_get_ref_plus_offset(current_offset: usize) -> String {
     }
 }
 
-// HLSL decoder generation helper function
 fn hlsl_calculate_num_uints_required_for_storage(ty: &GpuScalar, num_elements: usize) -> usize {
     let num_scalars_in_a_uint: usize = match ty {
         GpuScalar::I8 | GpuScalar::U8 => 4,
@@ -151,19 +150,18 @@ fn hlsl_generate_value_extractor(value_bit_size: u32) -> String {
         "inline uint extract_{}bit_value(uint bit_shift, uint package) {{\n",
         value_bit_size
     )
-    .unwrap();
+        .unwrap();
     write!(extractor, "    uint mask = {} << bit_shift;\n", mask_width).unwrap();
     write!(
         extractor,
         "{}",
         "    uint result = (package >> bit_shift) & mask;\n\n    return result;\n}\n\n"
     )
-    .unwrap();
+        .unwrap();
 
     extractor
 }
 
-// HLSL decoder generation helper function
 fn hlsl_generate_readers_accessors_and_unpackers(
     name: &String,
     package_fields: &Vec<(String, GpuType, Option<Vec<(String, GpuType, usize)>>)>,
@@ -180,7 +178,7 @@ fn hlsl_generate_readers_accessors_and_unpackers(
         "inline {}Packed {}_read(ByteAddressBuffer buf, {} ref) {{\n",
         name, name, ref_name,
     )
-    .unwrap();
+        .unwrap();
     write!(structure_decoder, "    {}Packed result;\n\n", name,).unwrap();
 
     let mut current_offset: usize = 0;
@@ -198,14 +196,24 @@ fn hlsl_generate_readers_accessors_and_unpackers(
                 package_fieldname,
                 hlsl_get_ref_plus_offset(current_offset),
             ),
-            GpuType::Vector(scalar, size) => format!(
-                "    {}{} {} = buf.Load{}({});\n",
-                scalar.hlsl_typename(),
-                size,
-                package_fieldname,
-                size,
-                hlsl_get_ref_plus_offset(current_offset)
-            ),
+            GpuType::Vector(scalar, size) => match size {
+                0 => panic!("vector of size 0 is not well defined!"),
+                1 => format!(
+                    "    {}{} {} = buf.Load({});\n",
+                    scalar.hlsl_typename(),
+                    size,
+                    package_fieldname,
+                    hlsl_get_ref_plus_offset(current_offset)
+                ),
+                _ => format!(
+                    "    {}{} {} = buf.Load{}({});\n",
+                    scalar.hlsl_typename(),
+                    size,
+                    package_fieldname,
+                    size,
+                    hlsl_get_ref_plus_offset(current_offset)
+                ),
+            },
             GpuType::InlineStruct(isn) => format!(
                 "    {} {} = {}_read({});\n",
                 isn,
@@ -224,7 +232,7 @@ fn hlsl_generate_readers_accessors_and_unpackers(
                 "inline {} {}_{}(ByteAddressBuffer buf, {} ref) {{\n",
                 tn, name, package_fieldname, ref_name,
             )
-            .unwrap();
+                .unwrap();
             write!(field_accessor, "{}", loader).unwrap();
             write!(field_accessor, "    return {};\n}}\n\n", package_fieldname).unwrap();
             field_accessors.push(field_accessor.clone());
@@ -247,14 +255,14 @@ fn hlsl_generate_readers_accessors_and_unpackers(
                                 "inline uint {}_unpack_{}(uint {}) {{\n    {} result;\n\n",
                                 name, unpacked_fieldname, package_fieldname, hlsl_type,
                             )
-                            .unwrap();
+                                .unwrap();
 
                             write!(
                                 unpacker,
                                 "    result = extract_{}bit_value({}, {});\n",
                                 size_in_bits, offset_in_package, package_fieldname
                             )
-                            .unwrap();
+                                .unwrap();
                         }
                         GpuType::Vector(scalar, unpacked_size) => {
                             let scalar_size_in_bits = 8 * scalar.size();
@@ -280,7 +288,7 @@ fn hlsl_generate_readers_accessors_and_unpackers(
                                 hlsl_type,
                                 num_uints_required_for_storage,
                             )
-                            .unwrap();
+                                .unwrap();
 
                             for i in 0..*unpacked_size {
                                 write!(
@@ -291,7 +299,7 @@ fn hlsl_generate_readers_accessors_and_unpackers(
                                     32 - (i + 1) * scalar_size_in_bits,
                                     package_fieldname
                                 )
-                                .unwrap();
+                                    .unwrap();
                             }
                         }
                         _ => panic!("only expected small types"),
@@ -309,7 +317,7 @@ fn hlsl_generate_readers_accessors_and_unpackers(
             "    result.{} = {};\n\n",
             package_fieldname, package_fieldname
         )
-        .unwrap();
+            .unwrap();
 
         current_offset += package_type.size(module);
     }
@@ -416,9 +424,9 @@ impl GpuType {
         }
         match ty {
             syn::Type::Path(TypePath {
-                path: syn::Path { segments, .. },
-                ..
-            }) => {
+                                path: syn::Path { segments, .. },
+                                ..
+                            }) => {
                 if segments.len() == 1 {
                     let seg = &segments[0];
                     if seg.ident == "Ref" {
@@ -455,10 +463,10 @@ impl GpuTypeDef {
     fn from_syn(item: &syn::Item) -> Result<Self, String> {
         match item {
             syn::Item::Struct(ItemStruct {
-                ident,
-                fields: Fields::Named(FieldsNamed { named, .. }),
-                ..
-            }) => {
+                                  ident,
+                                  fields: Fields::Named(FieldsNamed { named, .. }),
+                                  ..
+                              }) => {
                 let mut fields = Vec::new();
                 for field in named {
                     let field_ty = GpuType::from_syn(&field.ty)?;
@@ -468,8 +476,8 @@ impl GpuTypeDef {
                 Ok(GpuTypeDef::Struct(ident.to_string(), fields))
             }
             syn::Item::Enum(ItemEnum {
-                ident, variants, ..
-            }) => {
+                                ident, variants, ..
+                            }) => {
                 let mut v = Vec::new();
                 for variant in variants {
                     let vname = variant.ident.to_string();
@@ -583,13 +591,13 @@ impl GpuTypeDef {
                     "{}Packed {}_read(const device char *buf, {} ref) {{\n",
                     name, name, rn
                 )
-                .unwrap();
+                    .unwrap();
                 write!(
                     r,
                     "    return *((const device {}Packed *)(buf + ref));\n",
                     name
                 )
-                .unwrap();
+                    .unwrap();
                 write!(r, "}}\n").unwrap();
                 // Unpacked field accessors
                 for (fieldname, ty) in fields {
@@ -600,13 +608,13 @@ impl GpuTypeDef {
                             "{} {}_{}(const device char *buf, {} ref) {{\n",
                             tn, name, fieldname, rn
                         )
-                        .unwrap();
+                            .unwrap();
                         write!(
                             r,
                             "    return ((const device {}Packed *)(buf + ref))->{};\n",
                             name, fieldname
                         )
-                        .unwrap();
+                            .unwrap();
                         write!(r, "}}\n").unwrap();
                     }
                 }
@@ -624,13 +632,13 @@ impl GpuTypeDef {
                     "uint {}_tag(const device char *buf, {} ref) {{\n",
                     en.name, rn
                 )
-                .unwrap();
+                    .unwrap();
                 write!(
                     r,
                     "    return ((const device {} *)(buf + ref))->tag;\n",
                     en.name
                 )
-                .unwrap();
+                    .unwrap();
                 write!(r, "}}\n").unwrap();
                 // TODO: current code base is 1-based, but we could switch to 0
                 let mut tag = 1;
@@ -731,7 +739,7 @@ impl GpuTypeDef {
                                         size,
                                         fieldname
                                     )
-                                    .unwrap();
+                                        .unwrap();
                                     package_fields.push((
                                         fieldname.clone(),
                                         GpuType::Vector(scalar.clone(), *size),
@@ -763,7 +771,7 @@ impl GpuTypeDef {
                                             "    uint{} {};\n",
                                             num_required_uints, fieldname
                                         )
-                                        .unwrap();
+                                            .unwrap();
                                         package_fields.push((
                                             fieldname.clone(),
                                             GpuType::Vector(GpuScalar::U32, num_required_uints),
@@ -859,7 +867,7 @@ impl GpuTypeDef {
                                         size,
                                         fieldname
                                     )
-                                    .unwrap();
+                                        .unwrap();
                                     package_fields.push((fieldname.clone(), ty.clone(), None));
                                 }
                                 _ => {
@@ -874,7 +882,7 @@ impl GpuTypeDef {
                                             "    uint{} {};\n",
                                             num_uints_required_for_storage, fieldname
                                         )
-                                        .unwrap();
+                                            .unwrap();
                                         package_fields.push((
                                             fieldname.clone(),
                                             GpuType::Vector(
@@ -938,7 +946,7 @@ impl GpuTypeDef {
                     "{}",
                     hlsl_generate_readers_accessors_and_unpackers(name, &package_fields, module)
                 )
-                .unwrap();
+                    .unwrap();
             }
             GpuTypeDef::Enum(en) => {
                 let rn = format!("{}Ref", en.name);
@@ -954,7 +962,7 @@ impl GpuTypeDef {
                     "uint {}_tag(ByteAddressBuffer buf, {} ref) {{\n",
                     en.name, rn
                 )
-                .unwrap();
+                    .unwrap();
                 write!(r, "    uint result = buf.Load(ref);\n    return result;\n").unwrap();
                 write!(r, "}}\n\n").unwrap();
                 let mut tag = 0;
@@ -1028,9 +1036,9 @@ struct Items(Vec<syn::Item>);
 
 fn ty_as_single_ident(ty: &syn::Type) -> Option<String> {
     if let syn::Type::Path(TypePath {
-        path: syn::Path { segments, .. },
-        ..
-    }) = ty
+                               path: syn::Path { segments, .. },
+                               ..
+                           }) = ty
     {
         if segments.len() == 1 {
             let seg = &segments[0];
@@ -1044,9 +1052,9 @@ fn ty_as_single_ident(ty: &syn::Type) -> Option<String> {
 
 fn expr_int_lit(e: &Expr) -> Option<usize> {
     if let Expr::Lit(ExprLit {
-        lit: Lit::Int(lit_int),
-        ..
-    }) = e
+                         lit: Lit::Int(lit_int),
+                         ..
+                     }) = e
     {
         lit_int.base10_parse().ok()
     } else {
