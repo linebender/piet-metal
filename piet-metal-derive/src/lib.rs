@@ -411,10 +411,10 @@ struct PackagedField {
     size: usize,
 }
 
-enum PackagedFieldExtensionResult {
+enum PackResult {
     SuccessAndOpen,
-    SuccessAndFinished,
-    FailAndFinished,
+    SuccessAndClosed,
+    FailAndClosed,
 }
 
 impl PackagedField {
@@ -427,39 +427,39 @@ impl PackagedField {
         }
     }
 
-    fn extend(
+    fn pack(
         &mut self,
         module: &GpuModule,
         fieldtype: &GpuType,
         fieldname: &str,
-    ) -> Result<PackagedFieldExtensionResult, String> {
-        if !self.is_finished() {
+    ) -> Result<PackResult, String> {
+        if !self.is_closed() {
             let field_size = fieldtype.size(module);
 
-            if !(field_size + self.size < 4) {
+            if field_size + self.size > 4 {
                 if self.is_empty() {
                     self.packed_fields.push(PackedField {
                         name: String::from(fieldname),
                         ty: fieldtype.clone(),
                         offset_in_package: 0,
                     });
-                    self.finish(module).unwrap();
-                    Ok(PackagedFieldExtensionResult::SuccessAndFinished)
+                    self.close(module).unwrap();
+                    Ok(PackResult::SuccessAndClosed)
                 } else {
-                    self.finish(module).unwrap();
-                    Ok(PackagedFieldExtensionResult::FailAndFinished)
+                    self.close(module).unwrap();
+                    Ok(PackResult::FailAndClosed)
                 }
             } else {
+                self.size += field_size;
                 self.packed_fields.push(PackedField {
                     name: String::from(fieldname),
                     ty: fieldtype.clone(),
                     offset_in_package: 32 - self.size * 8,
                 });
-                self.size += field_size;
-                Ok(PackagedFieldExtensionResult::SuccessAndOpen)
+                Ok(PackResult::SuccessAndOpen)
             }
         } else {
-            Err(String::from("cannot extend finished package"))
+            Err(String::from("cannot extend closed package"))
         }
     }
 
@@ -467,14 +467,14 @@ impl PackagedField {
         self.packed_fields.len() == 0
     }
 
-    fn is_finished(&self) -> bool {
+    fn is_closed(&self) -> bool {
         self.ty.is_some()
     }
 
-    fn finish(&mut self, module: &GpuModule) -> Result<(), String> {
-        if !self.is_finished() {
+    fn close(&mut self, module: &GpuModule) -> Result<(), String> {
+        if !self.is_closed() {
             if self.is_empty() {
-                Err(String::from("cannot finish empty package"))
+                Err(String::from("cannot close empty package"))
             } else {
                 let packed_field_names = self
                     .packed_fields
@@ -553,7 +553,7 @@ impl PackagedField {
                 Ok(())
             }
         } else {
-            Err(String::from("cannot finish finished package"))
+            Err(String::from("cannot close closed package"))
         }
     }
 }
@@ -567,27 +567,27 @@ fn hlsl_generate_packaged_fields(
     let mut current_packaged_field = PackagedField::new();
     for (fieldname, ty) in fields {
         match current_packaged_field
-            .extend(module, &ty, &fieldname)
+            .pack(module, &ty, &fieldname)
             .unwrap()
         {
-            PackagedFieldExtensionResult::SuccessAndFinished => {
+            PackResult::SuccessAndClosed => {
                 package_fields.push(current_packaged_field.clone());
                 current_packaged_field = PackagedField::new();
             }
-            PackagedFieldExtensionResult::FailAndFinished => {
+            PackResult::FailAndClosed => {
                 package_fields.push(current_packaged_field.clone());
                 current_packaged_field = PackagedField::new();
                 current_packaged_field
-                    .extend(module, &ty, &fieldname)
+                    .pack(module, &ty, &fieldname)
                     .unwrap();
             }
             _ => {}
         }
     }
 
-    if !current_packaged_field.is_finished() {
+    if !current_packaged_field.is_closed() {
         if !current_packaged_field.is_empty() {
-            current_packaged_field.finish(module);
+            current_packaged_field.close(module).unwrap();
             package_fields.push(current_packaged_field.clone());
         }
     }
