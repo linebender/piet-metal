@@ -424,7 +424,7 @@ impl PackedField {
                     )),
                 },
                 GpuType::InlineStruct(isn) => Ok(format!(
-                    "    {}Packed {} = {}Packed_read({});\n",
+                    "    {}Packed {} = {}Packed_read(buf, {});\n",
                     isn,
                     packed_field_name,
                     isn,
@@ -461,15 +461,30 @@ impl PackedField {
         if let Some(ty) = &self.ty {
             let mut field_accessor = String::new();
 
-            write!(
-                field_accessor,
-                "inline {} {}_{}(ByteAddressBuffer buf, {} ref) {{\n",
-                ty.hlsl_typename(),
-                packed_struct_name,
-                self.name,
-                ref_type,
-            )
-            .unwrap();
+            match ty {
+                GpuType::InlineStruct(_) => {
+                    write!(
+                        field_accessor,
+                        "inline {}Packed {}_{}(ByteAddressBuffer buf, {} ref) {{\n",
+                        ty.hlsl_typename(),
+                        packed_struct_name,
+                        self.name,
+                        ref_type,
+                    )
+                    .unwrap();
+                }
+                _ => {
+                    write!(
+                        field_accessor,
+                        "inline {} {}_{}(ByteAddressBuffer buf, {} ref) {{\n",
+                        ty.hlsl_typename(),
+                        packed_struct_name,
+                        self.name,
+                        ref_type,
+                    )
+                    .unwrap();
+                }
+            }
             write!(field_accessor, "{}", reader).unwrap();
             write!(field_accessor, "    return {};\n}}\n\n", self.name).unwrap();
 
@@ -619,7 +634,7 @@ impl PackedStruct {
             }
             .unwrap()
         }
-        write!(r, "{}", "}\n\n").unwrap();
+        write!(r, "{}", "};\n\n").unwrap();
 
         r
     }
@@ -654,7 +669,7 @@ impl SpecifiedStruct {
         for (field_name, field_type) in self.fields.iter() {
             write!(r, "    {} {};\n", field_type.hlsl_typename(), field_name).unwrap()
         }
-        write!(r, "{}", "}\n\n").unwrap();
+        write!(r, "{}", "};\n\n").unwrap();
 
         r
     }
@@ -670,7 +685,7 @@ impl SpecifiedStruct {
         .unwrap();
 
         write!(r, "    {} result;\n\n", self.name).unwrap();
-        for (field_name, _) in self.fields.iter() {
+        for (field_name, field_type) in self.fields.iter() {
             let packed_field = self
                 .packed_form
                 .packed_fields
@@ -685,12 +700,24 @@ impl SpecifiedStruct {
                     "no packed field stores {} in {}Packed",
                     field_name, self.name
                 ));
-            write!(
-                r,
-                "    result.{} = {}_unpack_{}(packed_form.{});\n",
-                field_name, self.packed_form.name, field_name, packed_field.name
-            )
-            .unwrap();
+            match field_type {
+                GpuType::InlineStruct(name) => {
+                    write!(
+                        r,
+                        "    result.{} = {}Packed_unpack(packed_form.{});\n",
+                        field_name, name, packed_field.name
+                    )
+                    .unwrap();
+                }
+                _ => {
+                    write!(
+                        r,
+                        "    result.{} = {}_unpack_{}(packed_form.{});\n",
+                        field_name, self.packed_form.name, field_name, packed_field.name
+                    )
+                    .unwrap();
+                }
+            }
         }
         write!(r, "{}", "\n    return result;\n}\n\n").unwrap();
         r
@@ -1054,7 +1081,7 @@ impl GpuTypeDef {
 
                 let quotient_in_u32x4 = size / (4 * GpuScalar::U32.size());
                 let remainder_in_u32s = size - quotient_in_u32x4 * 4;
-                write!(r, "{}", "inline PietItem_read_into(ByteAddressBuffer src, uint src_ref, ByteAddressBuffer dst, uint dst_ref) {\n").unwrap();
+                write!(r, "{}", "inline void PietItem_read_into(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {\n").unwrap();
                 for i in 0..quotient_in_u32x4 {
                     write!(
                         r,
@@ -1145,7 +1172,15 @@ impl GpuModule {
         write!(&mut r, "{}", generate_hlsl_value_extractor(16)).unwrap();
 
         for def in &self.defs {
-            write!(&mut r, "typedef uint {}Ref;\n", def.name()).unwrap();
+            match def {
+                GpuTypeDef::Struct(name, _) => {
+                    write!(&mut r, "typedef uint {}Ref;\n", def.name()).unwrap();
+                    write!(&mut r, "typedef uint {}PackedRef;\n", def.name()).unwrap();
+                }
+                GpuTypeDef::Enum(_) => {
+                    write!(&mut r, "typedef uint {}Ref;\n", def.name()).unwrap();
+                }
+            }
         }
 
         write!(&mut r, "\n").unwrap();
