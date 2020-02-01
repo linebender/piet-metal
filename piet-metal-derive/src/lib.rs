@@ -443,14 +443,14 @@ impl PackedField {
     }
 
     /// True when the packed and unpacked types differ.
-    fn is_packed(&self) -> bool {
+    fn is_packed(&self, struct_result: bool) -> bool {
         if self.stored_fields.len() != 1 {
             return true;
         }
         match self.stored_fields[0].ty {
             GpuType::Scalar(scalar) => scalar.size() < 4,
             GpuType::Vector(scalar, _) => scalar.size() < 4,
-            // Maybe we should be sophisticated about inline structs
+            GpuType::InlineStruct(_) => struct_result,
             _ => false,
         }
     }
@@ -467,7 +467,7 @@ impl PackedField {
                     .collect::<Vec<String>>();
                 self.name = stored_field_names.join("_");
 
-                if self.is_packed() {
+                if self.is_packed(false) {
                     let summed_size = self.stored_fields.iter().map(|pf| pf.ty.size(module)).sum();
                     let size_in_uints = size_in_uints(summed_size);
                     if size_in_uints == 1 {
@@ -516,7 +516,7 @@ impl PackedField {
                     ))
                 }
                 GpuType::InlineStruct(isn) => Ok(format!(
-                    "    {}Packed {} = {}Packed_read(buf, {});\n",
+                    "    {}Packed {} = {}_read(buf, {});\n",
                     isn,
                     packed_field_name,
                     isn,
@@ -663,8 +663,8 @@ impl PackedStruct {
         write!(
             r,
             "inline {} {}_read({}, {} ref) {{\n",
-            stripped_name,
             self.name,
+            stripped_name,
             target.buf_arg(),
             ref_type,
         )
@@ -686,7 +686,7 @@ impl PackedStruct {
                 .unwrap();
 
             field_accessors.push(field_accessor);
-            if packed_field.is_packed() {
+            if packed_field.is_packed(false) {
                 unpackers.push(packed_field.generate_hlsl_unpackers(&self.name, target));
             }
 
@@ -717,7 +717,7 @@ impl PackedStruct {
     fn generate_hlsl_structure_def(&self) -> String {
         let mut r = String::new();
 
-        // The unpacked struct definition (is missing variable sized arrays)
+        // The packed struct definition (is missing variable sized arrays)
         write!(r, "struct {} {{\n", self.name).unwrap();
         if self.is_enum_variant {
             write!(r, "    uint tag;\n").unwrap();
@@ -771,7 +771,7 @@ impl SpecifiedStruct {
     fn generate_hlsl_structure_def(&self, target: TargetLang) -> String {
         let mut r = String::new();
 
-        // The packed struct definition (is missing variable sized arrays)
+        // The unpacked struct definition (is missing variable sized arrays)
         write!(r, "struct {} {{\n", self.name).unwrap();
 
         for (field_name, field_type) in self.fields.iter() {
@@ -814,7 +814,7 @@ impl SpecifiedStruct {
                     "no packed field stores {} in {}Packed",
                     field_name, self.name
                 ));
-            if packed_field.is_packed() {
+            if packed_field.is_packed(true) {
                 match field_type {
                     GpuType::InlineStruct(name) => {
                         write!(
