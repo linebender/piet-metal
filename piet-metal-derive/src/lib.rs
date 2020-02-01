@@ -74,7 +74,7 @@ impl TargetLang {
     }
 
     /// An expression for loading a number of uints.
-    fn load_exp(self, offset: usize, size: usize) -> String {
+    fn load_expr(self, offset: usize, size: usize) -> String {
         let tail = if offset == 0 {
             "".into()
         } else {
@@ -365,7 +365,7 @@ impl StoredField {
                             &format!(
                                 "extract_{}bit_value({}, {}{})",
                                 scalar_size_in_bits,
-                                i * scalar_size_in_bits,
+                                self.offset + (i * scalar_size_in_bits) % 32,
                                 packed_field_name,
                                 subscript
                             ),
@@ -496,8 +496,8 @@ impl PackedField {
 
             match ty {
                 GpuType::Scalar(scalar) => {
-                    let load_exp = target.load_exp(current_offset, 1);
-                    let cvt_exp = scalar.cvt(&load_exp, target);
+                    let load_expr = target.load_expr(current_offset, 1);
+                    let cvt_exp = scalar.cvt(&load_expr, target);
                     Ok(format!(
                         "    {} {} = {};\n",
                         type_name,
@@ -507,8 +507,8 @@ impl PackedField {
                 }
                 GpuType::Vector(scalar, size) => {
                     let size_in_uints = size_in_uints(scalar.size() * size);
-                    let load_exp = target.load_exp(current_offset, size_in_uints);
-                    let cvt_exp = scalar.cvt_vec(&load_exp, *size, target);
+                    let load_expr = target.load_expr(current_offset, size_in_uints);
+                    let cvt_exp = scalar.cvt_vec(&load_expr, *size, target);
                     Ok(format!(
                         "    {}{} {} = {};\n",
                         scalar.hlsl_typename(),
@@ -530,13 +530,13 @@ impl PackedField {
                             "    {}Ref {} = {};\n",
                             isn,
                             packed_field_name,
-                            target.load_exp(current_offset, 1),
+                            target.load_expr(current_offset, 1),
                         ))
                     } else {
                         Ok(format!(
                             "    uint {} = {};\n",
                             packed_field_name,
-                            target.load_exp(current_offset, 1),
+                            target.load_expr(current_offset, 1),
                         ))
                     }
                 }
@@ -1306,7 +1306,7 @@ impl GpuTypeDef {
                 write!(
                     r,
                     "    uint result = {};\n    return result;\n",
-                    target.load_exp(0, 1)
+                    target.load_expr(0, 1)
                 )
                 .unwrap();
                 write!(r, "}}\n\n").unwrap();
