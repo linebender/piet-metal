@@ -1341,14 +1341,15 @@ impl GpuTypeDef {
                             tail,
                             quotient_in_u32x4,
                             tail,
-                            simplified_add("src_ref", quotient_in_u32x4 * 4)
+                            simplified_add("src_ref", quotient_in_u32x4 * 4 * 4)
                         )
                         .unwrap();
                         write!(
                             r,
-                            "    dst.Store{}({});\n",
+                            "    dst.Store{}({}, group{});\n",
                             tail,
-                            simplified_add("dst_ref", quotient_in_u32x4 * 4)
+                            simplified_add("dst_ref", quotient_in_u32x4 * 4 * 4),
+                            quotient_in_u32x4
                         )
                         .unwrap();
                     }
