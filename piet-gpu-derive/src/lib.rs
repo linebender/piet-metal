@@ -72,7 +72,7 @@ impl TargetLang {
     fn buf_arg(self) -> &'static str {
         match self {
             TargetLang::Hlsl => "ByteAddressBuffer buf",
-            TargetLang::Msl => "const device *buf",
+            TargetLang::Msl => "const device char *buf",
         }
     }
 
@@ -83,19 +83,13 @@ impl TargetLang {
         } else {
             format!(" + {}", offset)
         };
-        let size_str = match size {
-            1 => "",
-            2 => "2",
-            3 => "3",
-            4 => "4",
-            _ => panic!("invalid vector size {}", size),
-        };
+        let size_str = vector_size_str(size);
         match self {
             TargetLang::Hlsl => format!("buf.Load{}(ref{})", size_str, tail),
             TargetLang::Msl => {
                 let packed = if size == 1 { "" } else { "packed_" };
                 format!(
-                    "*(device const *{}uint{})(buf + ref{})",
+                    "*(device const {}uint{}*)(buf + ref{})",
                     packed, size_str, tail
                 )
             }
@@ -144,32 +138,18 @@ impl GpuScalar {
 
     /// Convert an expression with type "uint" into the given scalar.
     fn cvt(self, inner: &str, target: TargetLang) -> String {
-        match (target, self) {
-            (TargetLang::Hlsl, GpuScalar::F32) => format!("asfloat({})", inner),
-            (TargetLang::Hlsl, GpuScalar::I32) => format!("asint({})", inner),
-            (TargetLang::Msl, GpuScalar::F32) => format!("as_type<float>({})", inner),
-            (TargetLang::Msl, GpuScalar::I32) => format!("as_type<int>({})", inner),
-            (TargetLang::Msl, GpuScalar::I16) => format!("as_type<short>({})", inner),
-            (TargetLang::Msl, GpuScalar::I8) => format!("as_type<char>({})", inner),
-            (TargetLang::Msl, GpuScalar::U16) => format!("as_type<ushort>({})", inner),
-            (TargetLang::Msl, GpuScalar::U8) => format!("as_type<uchar>({})", inner),
-            // TODO: probably need to be smarter about signed int conversion
-            _ => inner.into(),
-        }
+        self.cvt_vec(inner, 1, target)
     }
 
     /// Convert a uint vector into the given vector
     fn cvt_vec(self, inner: &str, size: usize, target: TargetLang) -> String {
+        let size = vector_size_str(size);
         match (target, self) {
             (TargetLang::Hlsl, GpuScalar::F32) => format!("asfloat({})", inner),
             (TargetLang::Hlsl, GpuScalar::I32) => format!("asint({})", inner),
             (TargetLang::Msl, GpuScalar::F32) => format!("as_type<float{}>({})", size, inner),
             (TargetLang::Msl, GpuScalar::I32) => format!("as_type<int{}>({})", size, inner),
-            (TargetLang::Msl, GpuScalar::I16) => format!("as_type<short{}>({})", size, inner),
-            (TargetLang::Msl, GpuScalar::I8) => format!("as_type<char{}>({})", size, inner),
-            (TargetLang::Msl, GpuScalar::U16) => format!("as_type<ushort{}>({})", size, inner),
-            (TargetLang::Msl, GpuScalar::U8) => format!("as_type<uchar{}>({})", size, inner),
-            // TODO: probably need to be smarter about signed int conversion
+            // TODO: need to be smarter about signed int conversion
             _ => inner.into(),
         }
     }
@@ -208,6 +188,21 @@ fn simplified_add(var_name: &str, c: usize) -> String {
         String::from(var_name)
     } else {
         format!("{} + {}", var_name, c)
+    }
+}
+
+/// Suffix to add to scalar type to make it into a vector.
+///
+/// For size of 1, returns empty string, though "usize1" is usually valid.
+/// This is so we have one name for the same type, and also so the suffix
+/// can be used for `ByteAddressBuf.Load` method names.
+fn vector_size_str(size: usize) -> &'static str {
+    match size {
+        1 => "",
+        2 => "2",
+        3 => "3",
+        4 => "4",
+        _ => panic!("illegal vector size {}", size)
     }
 }
 
@@ -1180,11 +1175,7 @@ impl GpuTypeDef {
                         .unwrap();
                     }
                     if remainder_in_u32s > 0 {
-                        let tail = match remainder_in_u32s {
-                            2 => "2",
-                            3 => "3",
-                            _ => "",
-                        };
+                        let tail = vector_size_str(remainder_in_u32s);
                         write!(
                             r,
                             "\n    uint{} group{} = src.Load{}({});\n",
