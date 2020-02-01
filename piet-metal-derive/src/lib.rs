@@ -500,9 +500,7 @@ impl PackedField {
                     let cvt_exp = scalar.cvt(&load_expr, target);
                     Ok(format!(
                         "    {} {} = {};\n",
-                        type_name,
-                        packed_field_name,
-                        cvt_exp,
+                        type_name, packed_field_name, cvt_exp,
                     ))
                 }
                 GpuType::Vector(scalar, size) => {
@@ -1311,47 +1309,51 @@ impl GpuTypeDef {
                 .unwrap();
                 write!(r, "}}\n\n").unwrap();
 
-                let quotient_in_u32x4 = size / (4 * GpuScalar::U32.size());
-                let remainder_in_u32s = size - quotient_in_u32x4 * 4;
-                write!(r, "{}", "inline void PietItem_read_into(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {\n").unwrap();
-                for i in 0..quotient_in_u32x4 {
-                    write!(
-                        r,
-                        "    uint4 group{} = src.Load4({});\n",
-                        i,
-                        simplified_add("src_ref", i * 4)
-                    )
-                    .unwrap();
-                    write!(
-                        r,
-                        "    dst.Store4({}, group{});\n",
-                        simplified_add("dst_ref", i * 4),
-                        i,
-                    )
-                    .unwrap();
-                }
-                match remainder_in_u32s {
-                    1 | 2 | 3 => {
+                if target == TargetLang::Hlsl {
+                    let quotient_in_u32x4 = size / (4 * GpuScalar::U32.size());
+                    let remainder_in_u32s = (size / 4) % 4;
+                    write!(r, "inline void {}_read_into(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {{\n", en.name).unwrap();
+                    for i in 0..quotient_in_u32x4 {
+                        write!(
+                            r,
+                            "    uint4 group{} = src.Load4({});\n",
+                            i,
+                            simplified_add("src_ref", i * 4 * 4)
+                        )
+                        .unwrap();
+                        write!(
+                            r,
+                            "    dst.Store4({}, group{});\n",
+                            simplified_add("dst_ref", i * 4 * 4),
+                            i,
+                        )
+                        .unwrap();
+                    }
+                    if remainder_in_u32s > 0 {
+                        let tail = match remainder_in_u32s {
+                            2 => "2",
+                            3 => "3",
+                            _ => "",
+                        };
                         write!(
                             r,
                             "\n    uint{} group{} = src.Load{}({});\n",
-                            remainder_in_u32s,
+                            tail,
                             quotient_in_u32x4,
-                            remainder_in_u32s,
+                            tail,
                             simplified_add("src_ref", quotient_in_u32x4 * 4)
                         )
                         .unwrap();
                         write!(
                             r,
                             "    dst.Store{}({});\n",
-                            remainder_in_u32s,
+                            tail,
                             simplified_add("dst_ref", quotient_in_u32x4 * 4)
                         )
                         .unwrap();
                     }
-                    _ => {}
+                    write!(r, "{}", "}\n\n").unwrap();
                 }
-                write!(r, "{}", "}\n\n").unwrap();
             }
         }
         r
@@ -1536,7 +1538,7 @@ pub fn piet_hlsl(input: TokenStream) -> TokenStream {
     //println!("input: {:#?}", input);
     let module = GpuModule::from_syn(&input).unwrap();
     let gen_hlsl_fn = format_ident!("gen_hlsl_{}", input.ident);
-    let result = module.to_hlsl(TargetLang::Msl);
+    let result = module.to_hlsl(TargetLang::Hlsl);
     let expanded = quote! {
         fn #gen_hlsl_fn() -> String {
             String::from(#result)

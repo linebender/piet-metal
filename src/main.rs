@@ -47,7 +47,7 @@ piet_hlsl! {
     }
 }
 
-piet_metal! {
+piet_hlsl! {
     mod ptcl {
         struct CmdCircle {
             // In existing code, this is packed; we might need an annotation for this.
