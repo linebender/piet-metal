@@ -8,6 +8,19 @@ struct SimpleGroup {
     // TODO: bbox
 }
 
+piet_hlsl! {
+    mod test {
+        struct SimpleGroup {
+            n_items: u32,
+            // This should actually be a variable size array.
+            items_ix: Ref<PietItem>,
+            // Note: we want a variable size array of bboxes
+            bbox: [u16; 4],
+        }
+
+    }
+}
+
 piet_metal! {
     mod scene {
         struct SimpleGroup {
@@ -93,7 +106,9 @@ piet_metal! {
 }
 
 fn main() {
-    //foo();
+    print!("{}", gen_hlsl_test());
+    /*
     gen_metal_scene(false);
     gen_metal_ptcl(true);
+    */
 }
