@@ -17,7 +17,6 @@ piet_hlsl! {
             // Note: we want a variable size array of bboxes
             bbox: [u16; 4],
         }
-
     }
 }
 
