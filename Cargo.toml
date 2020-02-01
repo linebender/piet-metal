@@ -10,7 +10,7 @@ categories = ["rendering::graphics-api"]
 
 [dependencies]
 kurbo = "0.5.6"
-piet-metal-derive = { path = "./piet-metal-derive" }
+piet-gpu-derive = { path = "./piet-gpu-derive" }
 
 # this is for reading the tiger, will be factored out
 roxmltree = "0.6.0"

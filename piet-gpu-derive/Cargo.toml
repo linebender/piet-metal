@@ -1,8 +1,8 @@
 [package]
-name = "piet-metal-derive"
+name = "piet-gpu-derive"
 version = "0.0.0"
 authors = ["Raph Levien <raph.levien@gmail.com>"]
-description = "Proc macro derives for piet-metal."
+description = "Proc macro derives for piet-gpu."
 license = "MIT/Apache-2.0"
 edition = "2018"
 keywords = ["graphics", "2d"]

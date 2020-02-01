@@ -14,21 +14,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "piet-metal"
-version = "0.0.0"
-dependencies = [
- "kurbo 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "piet-metal-derive 0.0.0",
- "roxmltree 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "piet-metal-derive"
+name = "piet-gpu-derive"
 version = "0.0.0"
 dependencies = [
  "proc-macro2 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "syn 1.0.11 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "piet-metal"
+version = "0.0.0"
+dependencies = [
+ "kurbo 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "piet-gpu-derive 0.0.0",
+ "roxmltree 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

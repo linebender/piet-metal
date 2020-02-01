@@ -13,9 +13,9 @@ use std::fmt::Write;
 use std::ops::Deref;
 
 use proc_macro::TokenStream;
-use syn::{parse::Parse, parse::ParseStream, parse_macro_input};
+use syn::parse_macro_input;
 use syn::{
-    Data, Expr, ExprLit, Fields, FieldsNamed, FieldsUnnamed, GenericArgument, ItemEnum, ItemStruct,
+    Expr, ExprLit, Fields, FieldsNamed, FieldsUnnamed, GenericArgument, ItemEnum, ItemStruct,
     Lit, PathArguments, TypeArray, TypePath,
 };
 
@@ -134,19 +134,6 @@ impl GpuScalar {
         }
     }
 
-    // deprecated
-    fn metal_typename(self) -> &'static str {
-        match self {
-            GpuScalar::F32 => "float",
-            GpuScalar::I8 => "char",
-            GpuScalar::I16 => "short",
-            GpuScalar::I32 => "int",
-            GpuScalar::U8 => "uchar",
-            GpuScalar::U16 => "ushort",
-            GpuScalar::U32 => "uint",
-        }
-    }
-
     fn size(self) -> usize {
         match self {
             GpuScalar::F32 | GpuScalar::I32 | GpuScalar::U32 => 4,
@@ -231,7 +218,7 @@ fn size_in_uints(num_bytes: usize) -> usize {
 }
 
 // TODO: this only generates unsigned extractors, we will need signed as well.
-fn generate_hlsl_value_extractor(size_in_bits: u32) -> String {
+fn generate_value_extractor(size_in_bits: u32) -> String {
     if size_in_bits > 31 {
         panic!("nonsensical to generate an extractor for a value with bit size greater than 31");
     }
@@ -297,7 +284,7 @@ struct SpecifiedStruct {
 }
 
 impl StoredField {
-    fn generate_hlsl_unpacker(
+    fn generate_unpacker(
         &self,
         packed_struct_name: &str,
         packed_field_name: &str,
@@ -479,7 +466,7 @@ impl PackedField {
         }
     }
 
-    fn generate_hlsl_reader(
+    fn generate_reader(
         &self,
         current_offset: usize,
         target: TargetLang,
@@ -538,7 +525,7 @@ impl PackedField {
         }
     }
 
-    fn generate_hlsl_accessor(
+    fn generate_accessor(
         &self,
         packed_struct_name: &str,
         ref_type: &str,
@@ -583,14 +570,14 @@ impl PackedField {
         }
     }
 
-    fn generate_hlsl_unpackers(&self, packed_struct_name: &str, target: TargetLang) -> String {
+    fn generate_unpackers(&self, packed_struct_name: &str, target: TargetLang) -> String {
         let mut unpackers = String::new();
 
         for sf in &self.stored_fields {
             write!(
                 unpackers,
                 "{}",
-                sf.generate_hlsl_unpacker(packed_struct_name, &self.name, target)
+                sf.generate_unpacker(packed_struct_name, &self.name, target)
             )
             .unwrap();
         }
@@ -645,7 +632,7 @@ impl PackedStruct {
         }
     }
 
-    fn generate_hlsl_functions(&self, module: &GpuModule, target: TargetLang) -> String {
+    fn generate_functions(&self, module: &GpuModule, target: TargetLang) -> String {
         let mut r = String::new();
         let mut field_accessors: Vec<String> = Vec::new();
         let mut unpackers: Vec<String> = Vec::new();
@@ -673,15 +660,15 @@ impl PackedStruct {
 
         for packed_field in &self.packed_fields {
             let reader: String = packed_field
-                .generate_hlsl_reader(current_offset, target)
+                .generate_reader(current_offset, target)
                 .unwrap();
             let field_accessor: String = packed_field
-                .generate_hlsl_accessor(stripped_name, &ref_type, &reader, target)
+                .generate_accessor(stripped_name, &ref_type, &reader, target)
                 .unwrap();
 
             field_accessors.push(field_accessor);
             if packed_field.is_packed(false) {
-                unpackers.push(packed_field.generate_hlsl_unpackers(&self.name, target));
+                unpackers.push(packed_field.generate_unpackers(&self.name, target));
             }
 
             write!(r, "{}", reader).unwrap();
@@ -708,7 +695,7 @@ impl PackedStruct {
         r
     }
 
-    fn generate_hlsl_structure_def(&self, target: TargetLang) -> String {
+    fn generate_structure_def(&self, target: TargetLang) -> String {
         let mut r = String::new();
 
         // The packed struct definition (is missing variable sized arrays)
@@ -741,11 +728,11 @@ impl PackedStruct {
         r
     }
 
-    fn to_hlsl(&self, module: &GpuModule, target: TargetLang) -> String {
+    fn to_shader(&self, module: &GpuModule, target: TargetLang) -> String {
         let mut r = String::new();
 
-        write!(r, "{}", self.generate_hlsl_structure_def(target)).unwrap();
-        write!(r, "{}", self.generate_hlsl_functions(module, target)).unwrap();
+        write!(r, "{}", self.generate_structure_def(target)).unwrap();
+        write!(r, "{}", self.generate_functions(module, target)).unwrap();
 
         r
     }
@@ -762,7 +749,7 @@ impl SpecifiedStruct {
         }
     }
 
-    fn generate_hlsl_structure_def(&self, target: TargetLang) -> String {
+    fn generate_structure_def(&self, target: TargetLang) -> String {
         let mut r = String::new();
 
         // The unpacked struct definition (is missing variable sized arrays)
@@ -782,7 +769,7 @@ impl SpecifiedStruct {
         r
     }
 
-    fn generate_hlsl_unpacker(&self) -> String {
+    fn generate_unpacker(&self) -> String {
         let mut r = String::new();
 
         write!(
@@ -840,33 +827,17 @@ impl SpecifiedStruct {
         r
     }
 
-    fn to_hlsl(&self, target: TargetLang) -> String {
+    fn to_shader(&self, target: TargetLang) -> String {
         let mut r = String::new();
 
-        write!(r, "{}", self.generate_hlsl_structure_def(target)).unwrap();
-        write!(r, "{}", self.generate_hlsl_unpacker()).unwrap();
+        write!(r, "{}", self.generate_structure_def(target)).unwrap();
+        write!(r, "{}", self.generate_unpacker()).unwrap();
 
         r
     }
 }
 
 impl GpuType {
-    fn metal_typename(&self) -> String {
-        match self {
-            GpuType::Scalar(scalar) => scalar.metal_typename().into(),
-            GpuType::Vector(scalar, size) => format!("{}{}", scalar.metal_typename(), size),
-            GpuType::InlineStruct(name) => format!("{}Packed", name),
-            // TODO: probably want to have more friendly names for simple struct refs.
-            GpuType::Ref(inner) => {
-                if let GpuType::InlineStruct(name) = inner.deref() {
-                    format!("{}Ref", name)
-                } else {
-                    "uint".into()
-                }
-            }
-        }
-    }
-
     // The type name for the *unpacked* version of the type.
     fn unpacked_typename(&self, target: TargetLang) -> String {
         match self {
@@ -1082,108 +1053,8 @@ impl GpuTypeDef {
         }
     }
 
-    fn to_metal(&self, module: &GpuModule) -> String {
-        let mut r = String::new();
-        match self {
-            GpuTypeDef::Struct(name, fields) => {
-                let rn = format!("{}Ref", name);
-                // The packed struct definition (is missing variable sized arrays)
-                write!(r, "struct {}Packed {{\n", name).unwrap();
-                if module.enum_variants.contains(name) {
-                    write!(r, "    uint tag;\n").unwrap();
-                }
-                for (field_name, ty) in fields {
-                    write!(r, "    {} {};\n", ty.metal_typename(), field_name).unwrap();
-                }
-                write!(r, "}};\n").unwrap();
-                // Read of packed structure
-                write!(
-                    r,
-                    "{}Packed {}_read(const device char *buf, {} ref) {{\n",
-                    name, name, rn
-                )
-                .unwrap();
-                write!(
-                    r,
-                    "    return *((const device {}Packed *)(buf + ref));\n",
-                    name
-                )
-                .unwrap();
-                write!(r, "}}\n").unwrap();
-                // Unpacked field accessors
-                for (field_name, ty) in fields {
-                    if ty.is_small() {
-                        let tn = ty.metal_typename();
-                        write!(
-                            r,
-                            "{} {}_{}(const device char *buf, {} ref) {{\n",
-                            tn, name, field_name, rn
-                        )
-                        .unwrap();
-                        write!(
-                            r,
-                            "    return ((const device {}Packed *)(buf + ref))->{};\n",
-                            name, field_name
-                        )
-                        .unwrap();
-                        write!(r, "}}\n").unwrap();
-                    }
-                }
-            }
-            GpuTypeDef::Enum(en) => {
-                let rn = format!("{}Ref", en.name);
-                write!(r, "struct {} {{\n", en.name).unwrap();
-                write!(r, "    uint tag;\n").unwrap();
-                let size = self.size(module);
-                let body_size = ((size + 3) >> 2) - 1;
-                write!(r, "    uint body[{}];\n", body_size).unwrap();
-                write!(r, "}};\n").unwrap();
-                // Read of entire structure
-                write!(
-                    r,
-                    "{} {}_read(const device char *buf, {} ref) {{\n",
-                    en.name, en.name, rn
-                )
-                .unwrap();
-                write!(
-                    r,
-                    "    return *((const device {} *)(buf + ref));\n",
-                    en.name
-                )
-                .unwrap();
-                write!(r, "}}\n").unwrap();
-                // Read of just the tag
-                write!(
-                    r,
-                    "uint {}_tag(const device char *buf, {} ref) {{\n",
-                    en.name, rn
-                )
-                .unwrap();
-                write!(
-                    r,
-                    "    return ((const device {} *)(buf + ref))->tag;\n",
-                    en.name
-                )
-                .unwrap();
-                write!(r, "}}\n").unwrap();
-                // TODO: current code base is 1-based, but we could switch to 0
-                let mut tag = 1;
-                for (name, fields) in &en.variants {
-                    write!(r, "#define {}_{} {}\n", en.name, name, tag).unwrap();
-                    tag += 1;
-
-                    if !fields.is_empty() {
-                        if let GpuType::InlineStruct(s) = &fields[0] {
-                            let s = module.resolve_by_name(&s).unwrap();
-                            s.to_metal_load_enum(&en.name, module, &mut r);
-                        }
-                    }
-                }
-            }
-        }
-        r
-    }
-
+    // TODO: implement this in new scheme
+    /*
     fn to_metal_load_enum(&self, enum_name: &str, module: &GpuModule, r: &mut String) {
         match self {
             GpuTypeDef::Struct(name, fields) => {
@@ -1214,7 +1085,10 @@ impl GpuTypeDef {
             _ => panic!("internal inconsistency"),
         }
     }
+    */
 
+    // TODO: implement writers
+    /*
     fn to_metal_wr(&self, _module: &GpuModule) -> String {
         let mut r = String::new();
         match self {
@@ -1245,15 +1119,16 @@ impl GpuTypeDef {
         }
         r
     }
+    */
 
-    fn to_hlsl(&self, module: &GpuModule, target: TargetLang) -> String {
+    fn to_shader(&self, module: &GpuModule, target: TargetLang) -> String {
         let mut r = String::new();
 
         match self {
             GpuTypeDef::Struct(name, fields) => {
                 let structure = SpecifiedStruct::new(module, name, fields.clone());
-                write!(r, "{}", structure.packed_form.to_hlsl(module, target)).unwrap();
-                write!(r, "{}", structure.to_hlsl(target)).unwrap();
+                write!(r, "{}", structure.packed_form.to_shader(module, target)).unwrap();
+                write!(r, "{}", structure.to_shader(target)).unwrap();
             }
             GpuTypeDef::Enum(en) => {
                 let rn = format!("{}Ref", en.name);
@@ -1287,7 +1162,7 @@ impl GpuTypeDef {
                 if target == TargetLang::Hlsl {
                     let quotient_in_u32x4 = size / (4 * GpuScalar::U32.size());
                     let remainder_in_u32s = (size / 4) % 4;
-                    write!(r, "inline void {}_read_into(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {{\n", en.name).unwrap();
+                    write!(r, "inline void {}_copy(ByteAddressBuffer src, uint src_ref, RWByteAddressBuffer dst, uint dst_ref) {{\n", en.name).unwrap();
                     for i in 0..quotient_in_u32x4 {
                         write!(
                             r,
@@ -1364,30 +1239,11 @@ impl GpuModule {
         Err(format!("could not find {} in module", name))
     }
 
-    fn to_metal(&self) -> String {
-        let mut r = String::new();
-        for def in &self.defs {
-            write!(&mut r, "typedef uint {}Ref;\n", def.name()).unwrap();
-        }
-        for def in &self.defs {
-            r.push_str(&def.to_metal(self));
-        }
-        r
-    }
-
-    fn to_metal_wr(&self) -> String {
-        let mut r = String::new();
-        for def in &self.defs {
-            r.push_str(&def.to_metal_wr(self));
-        }
-        r
-    }
-
-    fn to_hlsl(&self, target: TargetLang) -> String {
+    fn to_shader(&self, target: TargetLang) -> String {
         let mut r = String::new();
 
-        write!(&mut r, "{}", generate_hlsl_value_extractor(8)).unwrap();
-        write!(&mut r, "{}", generate_hlsl_value_extractor(16)).unwrap();
+        write!(&mut r, "{}", generate_value_extractor(8)).unwrap();
+        write!(&mut r, "{}", generate_value_extractor(16)).unwrap();
 
         for def in &self.defs {
             match def {
@@ -1402,7 +1258,7 @@ impl GpuModule {
 
         write!(&mut r, "\n").unwrap();
         for def in &self.defs {
-            r.push_str(&def.to_hlsl(self, target));
+            r.push_str(&def.to_shader(self, target));
         }
 
         for def in &self.defs {
@@ -1427,10 +1283,6 @@ impl GpuModule {
         r
     }
 }
-
-// Probably don't need this, will use ItemMod instead.
-#[derive(Debug)]
-struct Items(Vec<syn::Item>);
 
 fn ty_as_single_ident(ty: &syn::Type) -> Option<String> {
     if let syn::Type::Path(TypePath {
@@ -1464,25 +1316,7 @@ fn align_padding(offset: usize, alignment: usize) -> usize {
     offset.wrapping_neg() & (alignment - 1)
 }
 
-#[proc_macro]
-pub fn piet_metal(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as syn::ItemMod);
-    //println!("input: {:#?}", input);
-    let module = GpuModule::from_syn(&input).unwrap();
-    let gen_metal_fn = format_ident!("gen_metal_{}", input.ident);
-    let result = module.to_metal();
-    let result_wr = module.to_metal_wr();
-    let expanded = quote! {
-        fn #gen_metal_fn(gpu_write: bool) {
-            println!("{}", #result);
-            if gpu_write {
-                println!("{}", #result_wr);
-            }
-        }
-    };
-    expanded.into()
-}
-
+/* TODO: make derive macros
 #[proc_macro_derive(PietMetal)]
 pub fn derive_piet_metal(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::DeriveInput);
@@ -1507,30 +1341,26 @@ fn derive_proc_metal_impl(input: syn::DeriveInput) -> Result<proc_macro2::TokenS
     };
     Ok(expanded)
 }
+*/
 
 #[proc_macro]
-pub fn piet_hlsl(input: TokenStream) -> TokenStream {
+pub fn piet_gpu(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::ItemMod);
     //println!("input: {:#?}", input);
     let module = GpuModule::from_syn(&input).unwrap();
-    let gen_hlsl_fn = format_ident!("gen_hlsl_{}", input.ident);
-    let result = module.to_hlsl(TargetLang::Hlsl);
+    let gen_gpu_fn = format_ident!("gen_gpu_{}", input.ident);
+    let hlsl_result = module.to_shader(TargetLang::Hlsl);
+    let msl_result = module.to_shader(TargetLang::Msl);
     let expanded = quote! {
-        fn #gen_hlsl_fn() -> String {
-            String::from(#result)
+        fn #gen_gpu_fn(lang: &str) -> String {
+            match lang {
+                "HLSL" => #hlsl_result.into(),
+                "MSL" => #msl_result.into(),
+                _ => panic!("unkonwn shader lang {}", lang),
+            }
         }
     };
     expanded.into()
-}
-
-impl Parse for Items {
-    fn parse(input: ParseStream) -> Result<Self, syn::Error> {
-        let mut items = Vec::new();
-        while !input.is_empty() {
-            items.push(input.parse()?)
-        }
-        Ok(Items(items))
-    }
 }
 
 fn to_snake_case(mut str: &str) -> String {
