@@ -1,5 +1,5 @@
 #[macro_use]
-extern crate piet_metal_derive;
+extern crate piet_gpu_derive;
 
 //#[derive(PietMetal)]
 struct SimpleGroup {
@@ -8,7 +8,7 @@ struct SimpleGroup {
     // TODO: bbox
 }
 
-piet_metal! {
+piet_gpu! {
     mod scene {
         struct SimpleGroup {
             n_items: u32,
@@ -47,7 +47,7 @@ piet_metal! {
     }
 }
 
-piet_metal! {
+piet_gpu! {
     mod ptcl {
         struct CmdCircle {
             // In existing code, this is packed; we might need an annotation for this.
@@ -93,7 +93,5 @@ piet_metal! {
 }
 
 fn main() {
-    //foo();
-    gen_metal_scene(false);
-    gen_metal_ptcl(true);
+    print!("{}", gen_gpu_scene("MSL"));
 }
