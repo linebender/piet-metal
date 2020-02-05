@@ -15,8 +15,8 @@ use std::ops::Deref;
 use proc_macro::TokenStream;
 use syn::parse_macro_input;
 use syn::{
-    Expr, ExprLit, Fields, FieldsNamed, FieldsUnnamed, GenericArgument, ItemEnum, ItemStruct,
-    Lit, PathArguments, TypeArray, TypePath,
+    Expr, ExprLit, Fields, FieldsNamed, FieldsUnnamed, GenericArgument, ItemEnum, ItemStruct, Lit,
+    PathArguments, TypeArray, TypePath,
 };
 
 /// The target shader language. We can't make this a public type because of Rust rules.
@@ -60,8 +60,8 @@ enum GpuTypeDef {
 }
 
 struct GpuModule {
-    #[allow(unused)]
     name: String,
+    attrs: HashSet<String>,
     /// Set of item names that are used as enum variants.
     enum_variants: HashSet<String>,
     defs: Vec<GpuTypeDef>,
@@ -166,6 +166,18 @@ impl GpuScalar {
             _ => None,
         })
     }
+
+    fn gen_derive(&self) -> proc_macro2::TokenStream {
+        match self {
+            GpuScalar::F32 => quote!(f32),
+            GpuScalar::I8 => quote!(i8),
+            GpuScalar::I16 => quote!(i16),
+            GpuScalar::I32 => quote!(i32),
+            GpuScalar::U8 => quote!(u8),
+            GpuScalar::U16 => quote!(u16),
+            GpuScalar::U32 => quote!(u32),
+        }
+    }
 }
 
 impl std::fmt::Display for GpuScalar {
@@ -202,7 +214,7 @@ fn vector_size_str(size: usize) -> &'static str {
         2 => "2",
         3 => "3",
         4 => "4",
-        _ => panic!("illegal vector size {}", size)
+        _ => panic!("illegal vector size {}", size),
     }
 }
 
@@ -461,11 +473,7 @@ impl PackedField {
         }
     }
 
-    fn generate_reader(
-        &self,
-        current_offset: usize,
-        target: TargetLang,
-    ) -> Result<String, String> {
+    fn generate_reader(&self, current_offset: usize, target: TargetLang) -> Result<String, String> {
         if let Some(ty) = &self.ty {
             let type_name = ty.unpacked_typename(target);
             let packed_field_name = &self.name;
@@ -871,12 +879,12 @@ impl GpuType {
     }
 
     fn alignment(&self, module: &GpuModule) -> usize {
-        // TODO: there are alignment problems with vectors of 3
         match self {
-            GpuType::Scalar(scalar) => scalar.size(),
-            GpuType::Vector(scalar, size) => scalar.size() * size,
-            GpuType::InlineStruct(name) => module.resolve_by_name(&name).unwrap().alignment(module),
-            GpuType::Ref(_name) => 4,
+            GpuType::InlineStruct(_) => 4,
+            _ => {
+                let size = self.size(module);
+                if size >= 4 { 4 } else { 1 }
+            }
         }
     }
 
@@ -932,6 +940,48 @@ impl GpuType {
                 }
             }
             _ => Err("unknown type".into()),
+        }
+    }
+
+    /// Generate a Rust type.
+    fn gen_derive(&self, module: &GpuModule) -> proc_macro2::TokenStream {
+        match self {
+            GpuType::Scalar(s) => s.gen_derive(),
+            GpuType::Vector(s, len) => {
+                let scalar = s.gen_derive();
+                quote! { [#scalar; #len] }
+            }
+            GpuType::InlineStruct(name) => {
+                let name_id = format_ident!("{}", name);
+                quote! { #name_id }
+            }
+            GpuType::Ref(ty) => {
+                let gen_ty = ty.gen_derive(module);
+                quote! { piet_gpu_types::encoder::Ref<#gen_ty> }
+            }
+        }
+    }
+
+    fn gen_encode_field(&self, offset: usize, name: &str) -> proc_macro2::TokenStream {
+        match self {
+            GpuType::Scalar(s) => {
+                let end = offset + s.size();
+                let name_id = format_ident!("{}", name);
+                quote! {
+                    buf[#offset..#end].copy_from_slice(&self.#name_id.to_le_bytes());
+                }
+            }
+            GpuType::Vector(s, len) => {
+                let size = s.size();
+                let name_id = format_ident!("{}", name);
+                quote! {
+                    for i in 0..#len {
+                        let offset = #offset + i * #size;
+                        buf[offset..offset + #size].copy_from_slice(&self.#name_id[i].to_le_bytes());
+                    }
+                }
+            }
+            _ => unimplemented!(),
         }
     }
 }
@@ -1020,8 +1070,7 @@ impl GpuTypeDef {
                                 offset = 0;
                             }
                         }
-                        // Alignment needs work :/
-                        //offset += align_padding(offset, field.alignment(module));
+                        offset += align_padding(offset, field.alignment(module));
                         offset += field.size(module);
                     }
                     max_offset = max_offset.max(offset);
@@ -1032,18 +1081,11 @@ impl GpuTypeDef {
     }
 
     /// Alignment of the body of the definition.
+    ///
+    /// TODO: all structures are aligned to 4 bytes, not useful :/
     fn alignment(&self, module: &GpuModule) -> usize {
         match self {
-            GpuTypeDef::Struct(name, fields) => {
-                let mut alignment = 1;
-                if module.enum_variants.contains(name) {
-                    alignment = 4;
-                }
-                for (_name, field) in fields {
-                    alignment = alignment.max(field.alignment(module));
-                }
-                alignment
-            }
+            GpuTypeDef::Struct(name, fields) => 4,
             GpuTypeDef::Enum(_en) => unimplemented!(),
         }
     }
@@ -1200,11 +1242,101 @@ impl GpuTypeDef {
         }
         r
     }
+
+    /// Generate a struct/enum and encoder impl for the type.
+    fn gen_derive(&self, module: &GpuModule) -> proc_macro2::TokenStream {
+        match self {
+            GpuTypeDef::Struct(name, fields) => {
+                let name_id = format_ident!("{}", name);
+                let mut gen_fields = proc_macro2::TokenStream::new();
+                for (field_name, ty) in fields {
+                    let field_name_id = format_ident!("{}", field_name);
+                    let gen_ty = ty.gen_derive(module);
+                    let gen_field = quote! {
+                        pub #field_name_id: #gen_ty,
+                    };
+                    gen_fields.extend(gen_field);
+                }
+                let encoded_size = self.size(module);
+                // A note on offsets. The logic for computing the offset is duplicated with
+                // the logic for packing in the shader code; it's important that these sync
+                // up. It would be better to have one source of truth.
+                let mut offset = 0;
+                let mut encode_fields = proc_macro2::TokenStream::new();
+                for (field_name, ty) in fields {
+                    offset += align_padding(offset, ty.alignment(module));
+                    let encode_field = ty.gen_encode_field(offset, field_name);
+                    offset += ty.size(module);
+                    encode_fields.extend(encode_field);
+                }
+                quote! {
+                    pub struct #name_id {
+                        #gen_fields
+                    }
+
+                    impl piet_gpu_types::encoder::Encode for #name_id {
+                        fn encoded_size(&self) -> usize {
+                            #encoded_size
+                        }
+                        fn encode_to(&self, buf: &mut [u8]) {
+                            #encode_fields
+                        }
+                    }
+                }
+            }
+            GpuTypeDef::Enum(en) => {
+                let enum_name = format_ident!("{}", en.name);
+                let mut variants = proc_macro2::TokenStream::new();
+                let mut cases = proc_macro2::TokenStream::new();
+                let mut variant_ix = 0u32;
+                for (variant_name, fields) in &en.variants {
+                    let variant_id = format_ident!("{}", variant_name);
+                    let field_tys = fields.iter().map(|field| field.gen_derive(module));
+                    let variant = quote! {
+                        #variant_id(#(#field_tys),*),
+                    };
+                    variants.extend(variant);
+                    let case = quote! {
+                        #enum_name::#variant_id(a) => {
+                            buf[0..4].copy_from_slice(&#variant_ix.to_le_bytes());
+                            // TODO: set offset for field
+                            a.encode(buf);
+                        }
+                    };
+                    cases.extend(case);
+                    variant_ix += 1;
+                }
+                let encoded_size = self.size(module);
+                quote! {
+                    pub enum #enum_name {
+                        #variants
+                    }
+
+                    impl piet_gpu_types::encoder::Encode for #enum_name {
+                        fn encoded_size(&self) -> usize {
+                            #encoded_size
+                        }
+                        fn encode_to(&self, buf: &mut [u8]) {
+                            match self {
+                                #cases
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl GpuModule {
     fn from_syn(module: &syn::ItemMod) -> Result<Self, String> {
         let name = module.ident.to_string();
+        let mut attrs = HashSet::new();
+        for attr in &module.attrs {
+            if let Some(id) = path_as_single_ident(&attr.path) {
+                attrs.insert(id.to_owned());
+            }
+        }
         let mut defs = Vec::new();
         let mut enum_variants = HashSet::new();
         if let Some((_brace, items)) = &module.content {
@@ -1216,6 +1348,7 @@ impl GpuModule {
         }
         Ok(GpuModule {
             name,
+            attrs,
             enum_variants,
             defs,
         })
@@ -1273,22 +1406,38 @@ impl GpuModule {
         }
         r
     }
-}
 
-fn ty_as_single_ident(ty: &syn::Type) -> Option<String> {
-    if let syn::Type::Path(TypePath {
-        path: syn::Path { segments, .. },
-        ..
-    }) = ty
-    {
-        if segments.len() == 1 {
-            let seg = &segments[0];
-            if seg.arguments == PathArguments::None {
-                return Some(seg.ident.to_string());
+    fn gen_derive(&self) -> proc_macro2::TokenStream {
+        let mut ts = proc_macro2::TokenStream::new();
+        let module_name = format_ident!("{}", self.name);
+        for def in &self.defs {
+            let def_ts = def.gen_derive(self);
+            ts.extend(def_ts);
+        }
+        quote! {
+            mod #module_name {
+                #ts
             }
         }
     }
+}
+
+fn path_as_single_ident(path: &syn::Path) -> Option<String> {
+    if path.segments.len() == 1 {
+        let seg = &path.segments[0];
+        if seg.arguments == PathArguments::None {
+            return Some(seg.ident.to_string());
+        }
+    }
     None
+}
+
+fn ty_as_single_ident(ty: &syn::Type) -> Option<String> {
+    if let syn::Type::Path(TypePath { path, .. }) = ty {
+        path_as_single_ident(path)
+    } else {
+        None
+    }
 }
 
 fn expr_int_lit(e: &Expr) -> Option<usize> {
@@ -1342,15 +1491,19 @@ pub fn piet_gpu(input: TokenStream) -> TokenStream {
     let gen_gpu_fn = format_ident!("gen_gpu_{}", input.ident);
     let hlsl_result = module.to_shader(TargetLang::Hlsl);
     let msl_result = module.to_shader(TargetLang::Msl);
-    let expanded = quote! {
+    let mut expanded = quote! {
         fn #gen_gpu_fn(lang: &str) -> String {
             match lang {
                 "HLSL" => #hlsl_result.into(),
                 "MSL" => #msl_result.into(),
-                _ => panic!("unkonwn shader lang {}", lang),
+                _ => panic!("unknown shader lang {}", lang),
             }
         }
     };
+    if module.attrs.contains("rust_encode") {
+        let foo = module.gen_derive();
+        expanded.extend(foo);
+    }
     expanded.into()
 }
 

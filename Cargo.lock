@@ -23,6 +23,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "piet-gpu-types"
+version = "0.0.0"
+dependencies = [
+ "piet-gpu-derive 0.0.0",
+]
+
+[[package]]
 name = "piet-metal"
 version = "0.0.0"
 dependencies = [

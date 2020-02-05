@@ -1,0 +1,20 @@
+[package]
+name = "piet-metal"
+version = "0.0.0"
+authors = ["Raph Levien <raph.levien@gmail.com>"]
+description = "A Metal-based renderer for the piet 2D graphics abstraction."
+license = "MIT/Apache-2.0"
+edition = "2018"
+keywords = ["graphics", "2d"]
+categories = ["rendering::graphics-api"]
+
+[dependencies]
+kurbo = "0.5.6"
+piet-gpu-derive = { path = "../piet-gpu-derive" }
+
+# this is for reading the tiger, will be factored out
+roxmltree = "0.6.0"
+
+[lib]
+name = "piet_metal"
+crate-type = ["staticlib"]

@@ -47,6 +47,7 @@ piet_gpu! {
     }
 }
 
+/*
 piet_gpu! {
     mod ptcl {
         struct CmdCircle {
@@ -91,6 +92,7 @@ piet_gpu! {
         }
     }
 }
+*/
 
 fn main() {
     print!("{}", gen_gpu_scene("MSL"));
