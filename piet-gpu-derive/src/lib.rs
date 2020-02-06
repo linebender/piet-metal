@@ -963,22 +963,26 @@ impl GpuType {
     }
 
     fn gen_encode_field(&self, offset: usize, name: &str) -> proc_macro2::TokenStream {
+        let name_id = format_ident!("{}", name);
         match self {
             GpuType::Scalar(s) => {
                 let end = offset + s.size();
-                let name_id = format_ident!("{}", name);
                 quote! {
                     buf[#offset..#end].copy_from_slice(&self.#name_id.to_le_bytes());
                 }
             }
             GpuType::Vector(s, len) => {
                 let size = s.size();
-                let name_id = format_ident!("{}", name);
                 quote! {
                     for i in 0..#len {
                         let offset = #offset + i * #size;
                         buf[offset..offset + #size].copy_from_slice(&self.#name_id[i].to_le_bytes());
                     }
+                }
+            }
+            GpuType::Ref(_) => {
+                quote! {
+                    buf[#offset..#offset + 4].copy_from_slice(&self.#name_id.offset().to_le_bytes());
                 }
             }
             _ => unimplemented!(),
@@ -1262,6 +1266,9 @@ impl GpuTypeDef {
                 // the logic for packing in the shader code; it's important that these sync
                 // up. It would be better to have one source of truth.
                 let mut offset = 0;
+                if module.enum_variants.contains(name) {
+                    offset += 4;
+                }
                 let mut encode_fields = proc_macro2::TokenStream::new();
                 for (field_name, ty) in fields {
                     offset += align_padding(offset, ty.alignment(module));
@@ -1275,7 +1282,7 @@ impl GpuTypeDef {
                     }
 
                     impl piet_gpu_types::encoder::Encode for #name_id {
-                        fn encoded_size(&self) -> usize {
+                        fn fixed_size() -> usize {
                             #encoded_size
                         }
                         fn encode_to(&self, buf: &mut [u8]) {
@@ -1296,11 +1303,29 @@ impl GpuTypeDef {
                         #variant_id(#(#field_tys),*),
                     };
                     variants.extend(variant);
+                    let mut offset = 4;
+                    let mut args = Vec::new();
+                    let mut field_encoders = proc_macro2::TokenStream::new();
+                    for (ix, field) in fields.iter().enumerate() {
+                        let field_id = format_ident!("f{}", ix);
+                        if let GpuType::InlineStruct(_) = field {
+                            if offset == 4 {
+                                offset = 0;
+                            }
+                        }
+                        offset += align_padding(offset, field.alignment(module));
+                        let field_encoder = quote! {
+                            #field_id.encode_to(&mut buf[#offset..]);
+                        };
+                        field_encoders.extend(field_encoder);
+                        args.push(field_id);
+                        offset += field.size(module);
+                    }
                     let case = quote! {
-                        #enum_name::#variant_id(a) => {
+                        #enum_name::#variant_id(#(#args),*) => {
                             buf[0..4].copy_from_slice(&#variant_ix.to_le_bytes());
                             // TODO: set offset for field
-                            a.encode(buf);
+                            #field_encoders
                         }
                     };
                     cases.extend(case);
@@ -1313,7 +1338,7 @@ impl GpuTypeDef {
                     }
 
                     impl piet_gpu_types::encoder::Encode for #enum_name {
-                        fn encoded_size(&self) -> usize {
+                        fn fixed_size() -> usize {
                             #encoded_size
                         }
                         fn encode_to(&self, buf: &mut [u8]) {

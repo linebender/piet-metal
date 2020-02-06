@@ -17,10 +17,16 @@ pub struct Encoder {
 
 // TODO: we probably do want to encode slices, get rid of Sized bound
 pub trait Encode: Sized {
-    fn encoded_size(&self) -> usize;
+    /// Size if it's a fixed-size object, otherwise 0.
+    fn fixed_size() -> usize;
 
+    /// Encoded size, for both fixed and variable sized objects.
+    fn encoded_size(&self) -> usize { Self::fixed_size() }
+
+    /// Encode into a buffer; panics if not appropriately sized.
     fn encode_to(&self, buf: &mut [u8]);
 
+    /// Allocate a chunk and encode, returning a reference.
     fn encode(&self, encoder: &mut Encoder) -> Ref<Self> {
         let size = self.encoded_size();
         let (offset, buf) = encoder.alloc_chunk(size as u32);
@@ -36,7 +42,12 @@ impl<T> Ref<T> {
             _phantom: Default::default(),
         }
     }
+
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
 }
+
 impl Encoder {
     pub fn new() -> Encoder {
         Encoder {
@@ -56,7 +67,7 @@ impl Encoder {
 }
 
 impl<T> Encode for Ref<T> {
-    fn encoded_size(&self) -> usize {
+    fn fixed_size() -> usize {
         4
     }
 
@@ -66,7 +77,7 @@ impl<T> Encode for Ref<T> {
 }
 
 impl Encode for u32 {
-    fn encoded_size(&self) -> usize {
+    fn fixed_size() -> usize {
         4
     }
 
@@ -76,11 +87,28 @@ impl Encode for u32 {
 }
 
 impl Encode for f32 {
-    fn encoded_size(&self) -> usize {
+    fn fixed_size() -> usize {
         4
     }
 
     fn encode_to(&self, buf: &mut [u8]) {
         buf[0..4].copy_from_slice(&self.to_le_bytes());
+    }
+}
+
+// TODO: make this work for slices too, but need to deal with Sized bound
+//
+// Note: only works for vectors of fixed size objects.
+impl<T: Encode> Encode for Vec<T> {
+    fn fixed_size() -> usize { 0 }
+    fn encoded_size(&self) -> usize {
+        self.len() * T::fixed_size()
+    }
+
+    fn encode_to(&self, buf: &mut [u8]) {
+        let size = T::fixed_size();
+        for (ix, val) in self.iter().enumerate() {
+            val.encode_to(&mut buf[ix * size..]);
+        }
     }
 }
