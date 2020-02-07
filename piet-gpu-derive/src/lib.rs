@@ -957,7 +957,7 @@ impl GpuType {
             }
             GpuType::Ref(ty) => {
                 let gen_ty = ty.gen_derive(module);
-                quote! { piet_gpu_types::encoder::Ref<#gen_ty> }
+                quote! { crate::encoder::Ref<#gen_ty> }
             }
         }
     }
@@ -1281,7 +1281,7 @@ impl GpuTypeDef {
                         #gen_fields
                     }
 
-                    impl piet_gpu_types::encoder::Encode for #name_id {
+                    impl crate::encoder::Encode for #name_id {
                         fn fixed_size() -> usize {
                             #encoded_size
                         }
@@ -1337,7 +1337,7 @@ impl GpuTypeDef {
                         #variants
                     }
 
-                    impl piet_gpu_types::encoder::Encode for #enum_name {
+                    impl crate::encoder::Encode for #enum_name {
                         fn fixed_size() -> usize {
                             #encoded_size
                         }
@@ -1517,7 +1517,7 @@ pub fn piet_gpu(input: TokenStream) -> TokenStream {
     let hlsl_result = module.to_shader(TargetLang::Hlsl);
     let msl_result = module.to_shader(TargetLang::Msl);
     let mut expanded = quote! {
-        fn #gen_gpu_fn(lang: &str) -> String {
+        pub fn #gen_gpu_fn(lang: &str) -> String {
             match lang {
                 "HLSL" => #hlsl_result.into(),
                 "MSL" => #msl_result.into(),

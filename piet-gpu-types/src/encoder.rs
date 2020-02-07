@@ -46,6 +46,10 @@ impl<T> Ref<T> {
     pub fn offset(&self) -> u32 {
         self.offset
     }
+
+    pub fn transmute<U>(&self) -> Ref<U> {
+        Ref::new(self.offset)
+    }
 }
 
 impl Encoder {
@@ -64,6 +68,10 @@ impl Encoder {
     pub fn buf(&self) -> &[u8] {
         &self.buf
     }
+
+    pub fn buf_mut(&mut self) -> &mut [u8] {
+        &mut self.buf
+    }
 }
 
 impl<T> Encode for Ref<T> {
@@ -75,6 +83,9 @@ impl<T> Encode for Ref<T> {
         buf[0..4].copy_from_slice(&self.offset.to_le_bytes());
     }
 }
+
+// Encode impls for scalar and small vector types are as needed; it's a finite set of
+// possibilities, so we could do it all with macros, but by hand is expedient.
 
 impl Encode for u32 {
     fn fixed_size() -> usize {
@@ -93,6 +104,30 @@ impl Encode for f32 {
 
     fn encode_to(&self, buf: &mut [u8]) {
         buf[0..4].copy_from_slice(&self.to_le_bytes());
+    }
+}
+
+impl Encode for [u16; 4] {
+    fn fixed_size() -> usize {
+        8
+    }
+
+    fn encode_to(&self, buf: &mut [u8]) {
+        buf[0..2].copy_from_slice(&self[0].to_le_bytes());
+        buf[2..4].copy_from_slice(&self[1].to_le_bytes());
+        buf[4..6].copy_from_slice(&self[2].to_le_bytes());
+        buf[6..8].copy_from_slice(&self[3].to_le_bytes());
+    }
+}
+
+impl Encode for [f32; 2] {
+    fn fixed_size() -> usize {
+        8
+    }
+
+    fn encode_to(&self, buf: &mut [u8]) {
+        buf[0..4].copy_from_slice(&self[0].to_le_bytes());
+        buf[4..8].copy_from_slice(&self[1].to_le_bytes());
     }
 }
 

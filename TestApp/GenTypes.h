@@ -27,8 +27,8 @@ typedef uint PietItemRef;
 
 struct SimpleGroupPacked {
     uint n_items;
-    PietItemRef items_ix;
-    uint2 bbox;
+    PietItemRef items;
+    uint bboxes;
 };
 
 inline SimpleGroupPacked SimpleGroup_read(const device char *buf, SimpleGroupRef ref) {
@@ -37,11 +37,11 @@ inline SimpleGroupPacked SimpleGroup_read(const device char *buf, SimpleGroupRef
     uint n_items = *(device const uint*)(buf + ref);
     result.n_items = n_items;
 
-    PietItemRef items_ix = *(device const uint*)(buf + ref + 4);
-    result.items_ix = items_ix;
+    PietItemRef items = *(device const uint*)(buf + ref + 4);
+    result.items = items;
 
-    uint2 bbox = *(device const packed_uint2*)(buf + ref + 8);
-    result.bbox = bbox;
+    uint bboxes = *(device const uint*)(buf + ref + 8);
+    result.bboxes = bboxes;
 
     return result;
 }
@@ -51,38 +51,28 @@ inline uint SimpleGroup_n_items(const device char *buf, SimpleGroupRef ref) {
     return n_items;
 }
 
-inline PietItemRef SimpleGroup_items_ix(const device char *buf, SimpleGroupRef ref) {
-    PietItemRef items_ix = *(device const uint*)(buf + ref + 4);
-    return items_ix;
+inline PietItemRef SimpleGroup_items(const device char *buf, SimpleGroupRef ref) {
+    PietItemRef items = *(device const uint*)(buf + ref + 4);
+    return items;
 }
 
-inline uint2 SimpleGroup_bbox(const device char *buf, SimpleGroupRef ref) {
-    uint2 bbox = *(device const packed_uint2*)(buf + ref + 8);
-    return bbox;
-}
-
-inline uint4 SimpleGroup_unpack_bbox(uint2 bbox) {
-    uint4 result;
-
-    result[0] = extract_16bit_value(0, bbox[0]);
-    result[1] = extract_16bit_value(16, bbox[0]);
-    result[2] = extract_16bit_value(0, bbox[1]);
-    result[3] = extract_16bit_value(16, bbox[1]);
-    return result;
+inline uint SimpleGroup_bboxes(const device char *buf, SimpleGroupRef ref) {
+    uint bboxes = *(device const uint*)(buf + ref + 8);
+    return bboxes;
 }
 
 struct SimpleGroup {
     uint n_items;
-    PietItemRef items_ix;
-    uint4 bbox;
+    PietItemRef items;
+    uint bboxes;
 };
 
 inline SimpleGroup SimpleGroup_unpack(SimpleGroupPacked packed_form) {
     SimpleGroup result;
 
     result.n_items = packed_form.n_items;
-    result.items_ix = packed_form.items_ix;
-    result.bbox = SimpleGroup_unpack_bbox(packed_form.bbox);
+    result.items = packed_form.items;
+    result.bboxes = packed_form.bboxes;
 
     return result;
 }
@@ -319,13 +309,12 @@ inline uint PietItem_tag(const device char *buf, PietItemRef ref) {
     return result;
 }
 
-#define SIMPLE_GROUP_SIZE 16
+#define SIMPLE_GROUP_SIZE 12
 #define PIET_ITEM_SIZE 32
-// TODO: these are manually fixed up. Make encoders consistent
-#define PietItem_Circle 1
-#define PietItem_Line 2
-#define PietItem_Fill 3
-#define PietItem_Poly 4
+#define PietItem_Circle 0
+#define PietItem_Line 1
+#define PietItem_Fill 2
+#define PietItem_Poly 3
 
 // Following are older-style accessors (haven't converted ptcl yet)
 
