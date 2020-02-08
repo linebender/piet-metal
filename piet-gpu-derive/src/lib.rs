@@ -883,7 +883,11 @@ impl GpuType {
             GpuType::InlineStruct(_) => 4,
             _ => {
                 let size = self.size(module);
-                if size >= 4 { 4 } else { 1 }
+                if size >= 4 {
+                    4
+                } else {
+                    1
+                }
             }
         }
     }
@@ -985,7 +989,11 @@ impl GpuType {
                     buf[#offset..#offset + 4].copy_from_slice(&self.#name_id.offset().to_le_bytes());
                 }
             }
-            _ => unimplemented!(),
+            _ => {
+                quote! {
+                    &self.#name_id.encode_to(&mut buf[#offset..]);
+                }
+            }
         }
     }
 }
@@ -1269,6 +1277,7 @@ impl GpuTypeDef {
                 if module.enum_variants.contains(name) {
                     offset += 4;
                 }
+
                 let mut encode_fields = proc_macro2::TokenStream::new();
                 for (field_name, ty) in fields {
                     offset += align_padding(offset, ty.alignment(module));
@@ -1276,6 +1285,7 @@ impl GpuTypeDef {
                     offset += ty.size(module);
                     encode_fields.extend(encode_field);
                 }
+
                 quote! {
                     pub struct #name_id {
                         #gen_fields
