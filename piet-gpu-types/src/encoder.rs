@@ -21,7 +21,9 @@ pub trait Encode: Sized {
     fn fixed_size() -> usize;
 
     /// Encoded size, for both fixed and variable sized objects.
-    fn encoded_size(&self) -> usize { Self::fixed_size() }
+    fn encoded_size(&self) -> usize {
+        Self::fixed_size()
+    }
 
     /// Encode into a buffer; panics if not appropriately sized.
     fn encode_to(&self, buf: &mut [u8]);
@@ -54,9 +56,7 @@ impl<T> Ref<T> {
 
 impl Encoder {
     pub fn new() -> Encoder {
-        Encoder {
-            buf: Vec::new(),
-        }
+        Encoder { buf: Vec::new() }
     }
 
     pub fn alloc_chunk(&mut self, size: u32) -> (u32, &mut [u8]) {
@@ -135,7 +135,9 @@ impl Encode for [f32; 2] {
 //
 // Note: only works for vectors of fixed size objects.
 impl<T: Encode> Encode for Vec<T> {
-    fn fixed_size() -> usize { 0 }
+    fn fixed_size() -> usize {
+        0
+    }
     fn encoded_size(&self) -> usize {
         self.len() * T::fixed_size()
     }

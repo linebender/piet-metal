@@ -112,12 +112,7 @@ impl SceneEncoder {
         }
     }
 
-    pub fn fill_path(
-        &mut self,
-        group: &mut GroupEncoder,
-        bezpath: &BezPath,
-        rgba: u32,
-    ) {
+    pub fn fill_path(&mut self, group: &mut GroupEncoder, bezpath: &BezPath, rgba: u32) {
         let flattened = flatten_path(bezpath, TOLERANCE);
         for subpath in &flattened {
             self.fill_polyline(group, subpath, rgba);

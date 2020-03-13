@@ -1,4 +1,6 @@
-pub use self::scene::{SimpleGroup, PietCircle, PietStrokeLine, PietFill, PietStrokePolyLine, PietItem};
+pub use self::scene::{
+    PietCircle, PietFill, PietItem, PietStrokeLine, PietStrokePolyLine, SimpleGroup,
+};
 
 piet_gpu! {
     #[rust_encode]

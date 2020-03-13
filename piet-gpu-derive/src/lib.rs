@@ -76,6 +76,14 @@ impl TargetLang {
         }
     }
 
+    /// The typed function argument for "buf" when it is mutable
+    fn mut_buf_arg(self) -> &'static str {
+        match self {
+            TargetLang::Hlsl => "RWByteAddressBuffer buf",
+            TargetLang::Msl => "device char *buf",
+        }
+    }
+
     /// An expression for loading a number of uints.
     fn load_expr(self, offset: usize, size: usize) -> String {
         let tail = if offset == 0 {
@@ -91,6 +99,27 @@ impl TargetLang {
                 format!(
                     "*(device const {}uint{}*)(buf + ref{})",
                     packed, size_str, tail
+                )
+            }
+        }
+    }
+    /// An expression for storing a number of uints.
+    ///
+    /// Return value is a statement without any surrounding whitespace.
+    fn store_stmt(self, offset: usize, size: usize, value: &str) -> String {
+        let tail = if offset == 0 {
+            "".into()
+        } else {
+            format!(" + {}", offset)
+        };
+        let size_str = vector_size_str(size);
+        match self {
+            TargetLang::Hlsl => format!("buf.Store{}(ref{}, {});", size_str, tail, value),
+            TargetLang::Msl => {
+                let packed = if size == 1 { "" } else { "packed_" };
+                format!(
+                    "*(device {}uint{}*)(buf + ref{}) = {};",
+                    packed, size_str, tail, value
                 )
             }
         }
@@ -149,6 +178,21 @@ impl GpuScalar {
             (TargetLang::Hlsl, GpuScalar::I32) => format!("asint({})", inner),
             (TargetLang::Msl, GpuScalar::F32) => format!("as_type<float{}>({})", size, inner),
             (TargetLang::Msl, GpuScalar::I32) => format!("as_type<int{}>({})", size, inner),
+            // TODO: need to be smarter about signed int conversion
+            _ => inner.into(),
+        }
+    }
+
+    /// Convert the given vector into a uint vector
+    fn cvt_vec_inv(self, inner: &str, size: usize, target: TargetLang) -> String {
+        let size = vector_size_str(size);
+        match (target, self) {
+            (TargetLang::Hlsl, GpuScalar::F32) | (TargetLang::Hlsl, GpuScalar::I32) => {
+                format!("asuint({})", inner)
+            }
+            (TargetLang::Msl, GpuScalar::F32) | (TargetLang::Msl, GpuScalar::I32) => {
+                format!("as_type<uint{}>({})", size, inner)
+            }
             // TODO: need to be smarter about signed int conversion
             _ => inner.into(),
         }
@@ -528,6 +572,36 @@ impl PackedField {
         }
     }
 
+    fn generate_field_writer(&self, offset: usize, target: TargetLang) -> String {
+        let ty = self.ty.as_ref().unwrap();
+        match ty {
+            GpuType::Scalar(scalar) => {
+                let value_exp = format!("s.{}", self.name);
+                let cvt_exp = scalar.cvt_vec_inv(&value_exp, 1, target);
+                format!("    {}\n", target.store_stmt(offset, 1, &cvt_exp))
+            }
+            GpuType::Vector(scalar, size) => {
+                let size_in_uints = size_in_uints(scalar.size() * size);
+                let value_exp = format!("s.{}", self.name);
+                let cvt_exp = scalar.cvt_vec_inv(&value_exp, *size, target);
+                format!(
+                    "    {}\n",
+                    target.store_stmt(offset, size_in_uints, &cvt_exp)
+                )
+            }
+            GpuType::InlineStruct(isn) => format!(
+                "    {}_write(buf, {}, s.{});\n",
+                isn,
+                simplified_add("ref", offset),
+                self.name,
+            ),
+            GpuType::Ref(_) => {
+                let value_exp = format!("s.{}", self.name);
+                format!("    {}\n", target.store_stmt(offset, 1, &value_exp))
+            }
+        }
+    }
+
     fn generate_accessor(
         &self,
         packed_struct_name: &str,
@@ -586,6 +660,10 @@ impl PackedField {
         }
 
         unpackers
+    }
+
+    fn generate_packer(&self, target: TargetLang) -> String {
+        format!("// packer for {}\n", self.name)
     }
 
     fn size(&self, module: &GpuModule) -> Result<usize, String> {
@@ -736,6 +814,55 @@ impl PackedStruct {
 
         write!(r, "{}", self.generate_structure_def(target)).unwrap();
         write!(r, "{}", self.generate_functions(module, target)).unwrap();
+
+        r
+    }
+
+    fn to_shader_wr(&self, module: &GpuModule, target: TargetLang) -> String {
+        let mut r = String::new();
+
+        write!(r, "// write functions for {}\n", self.name).unwrap();
+        let mut packers: Vec<String> = Vec::new();
+
+        // This is something of a hack to strip the "Packed" off the struct name
+        let stripped_name = &self.name[0..self.name.len() - 6];
+        let ref_type = format!("{}Ref", stripped_name);
+
+        write!(
+            r,
+            "inline void {}_write({}, {} ref, {} s) {{\n",
+            stripped_name,
+            target.mut_buf_arg(),
+            ref_type,
+            self.name,
+        )
+        .unwrap();
+
+        // The duplication here really suggests we have an intermediate representation
+        // that has the offsets in place. But oh well.
+        let mut current_offset: usize = 0;
+        if self.is_enum_variant {
+            // account for tag
+            writeln!(
+                r,
+                "    {}",
+                target.store_stmt(0, 1, "0 /* TODO: tag value */")
+            )
+            .unwrap();
+            current_offset = 4;
+        }
+
+        for packed_field in &self.packed_fields {
+            r.push_str(&packed_field.generate_field_writer(current_offset, target));
+
+            current_offset += packed_field.size(module).unwrap();
+        }
+
+        write!(r, "}}\n\n",).unwrap();
+
+        for packer in packers {
+            write!(r, "{}", packer).unwrap();
+        }
 
         r
     }
@@ -1255,6 +1382,43 @@ impl GpuTypeDef {
         r
     }
 
+    fn to_shader_wr(&self, module: &GpuModule, target: TargetLang) -> String {
+        let mut r = String::new();
+        match self {
+            GpuTypeDef::Struct(name, fields) => {
+                // Write of packed structure
+                writeln!(r, "// TODO: writer for struct {}", name).unwrap();
+                let structure = SpecifiedStruct::new(module, name, fields.clone());
+                write!(r, "{}", structure.packed_form.to_shader_wr(module, target)).unwrap();
+                /*
+                write!(
+                    r,
+                    "void {}_write(device char *buf, {}Ref ref, {}Packed s) {{\n",
+                    name, name, name
+                )
+                .unwrap();
+                write!(r, "    *((device {}Packed *)(buf + ref)) = s;\n", name).unwrap();
+                write!(r, "}}\n").unwrap();
+                */
+            }
+            // We don't write individual enum structs, we only write their variants.
+            GpuTypeDef::Enum(en) => {
+                if en.variants.iter().any(|(_name, fields)| fields.is_empty()) {
+                    writeln!(
+                        r,
+                        "void {}_write_tag({}, CmdRef ref, uint tag) {{",
+                        en.name,
+                        target.mut_buf_arg(),
+                    )
+                    .unwrap();
+                    writeln!(r, "    {}", target.store_stmt(0, 1, "tag")).unwrap();
+                    writeln!(r, "}}").unwrap();
+                }
+            }
+        }
+        r
+    }
+
     /// Generate a struct/enum and encoder impl for the type.
     fn gen_derive(&self, module: &GpuModule) -> proc_macro2::TokenStream {
         match self {
@@ -1439,6 +1603,12 @@ impl GpuModule {
                 }
             }
         }
+
+        if self.attrs.contains("gpu_write") {
+            for def in &self.defs {
+                r.push_str(&def.to_shader_wr(self, target));
+            }
+        }
         r
     }
 
@@ -1490,33 +1660,6 @@ fn expr_int_lit(e: &Expr) -> Option<usize> {
 fn align_padding(offset: usize, alignment: usize) -> usize {
     offset.wrapping_neg() & (alignment - 1)
 }
-
-/* TODO: make derive macros
-#[proc_macro_derive(PietMetal)]
-pub fn derive_piet_metal(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as syn::DeriveInput);
-    derive_proc_metal_impl(input)
-        .unwrap_or_else(|err| err.to_compile_error())
-        .into()
-}
-
-fn derive_proc_metal_impl(input: syn::DeriveInput) -> Result<proc_macro2::TokenStream, syn::Error> {
-    println!("input: {:#?}", input);
-    match &input.data {
-        Data::Struct { .. } => {
-            println!("it's a struct!");
-        }
-        _ => (),
-    }
-    let s = "this is a string";
-    let expanded = quote! {
-        fn foo() {
-            println!("this was generated by proc macro: {}", #s);
-        }
-    };
-    Ok(expanded)
-}
-*/
 
 #[proc_macro]
 pub fn piet_gpu(input: TokenStream) -> TokenStream {
