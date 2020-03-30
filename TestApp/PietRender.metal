@@ -184,10 +184,11 @@ tileKernel(device const char *scene [[buffer(0)]],
     
     SimpleGroupRef group_ref = 0;
     // TODO: write accessor functions for variable-sized array here
-    device const SimpleGroupPacked *group = (device const SimpleGroupPacked *)scene;
-    device const ushort4 *bboxes = (device const ushort4 *)&group->bbox;
+    uint bboxes_ref = SimpleGroup_bboxes(scene, group_ref);
+    // TODO: accessor function for array access
+    device const packed_ushort4 *bboxes = (device const packed_ushort4 *)(scene + bboxes_ref);
     uint n = SimpleGroup_n_items(scene, group_ref);
-    PietItemRef items_ref = SimpleGroup_items_ix(scene, group_ref);
+    PietItemRef items_ref = SimpleGroup_items(scene, group_ref);
     for (uint i = 0; i < n; i += tgs) {
         if (tix < nBitmap) {
             atomic_store_explicit(&bitmap, 0, relaxed);

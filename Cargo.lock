@@ -23,11 +23,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "piet-gpu-types"
+version = "0.0.0"
+dependencies = [
+ "piet-gpu-derive 0.0.0",
+]
+
+[[package]]
 name = "piet-metal"
 version = "0.0.0"
 dependencies = [
  "kurbo 0.5.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "piet-gpu-derive 0.0.0",
+ "piet-gpu-types 0.0.0",
  "roxmltree 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
